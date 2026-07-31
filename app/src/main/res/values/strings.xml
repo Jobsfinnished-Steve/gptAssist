@@ -11,4 +11,11 @@
     <string name="all_urls">All URLs allowed</string>
     <string name="urls_restricted">URLs restricted</string>
     <string name="url_copied">URL copied</string>
+    <string name="photo_read_error">The photo could not be read.</string>
+    <string name="photo_partial_metadata_error">Photos attached, but some metadata could not be read.</string>
+    <string name="photo_context_setting">Generate photo context automatically</string>
+    <string name="photo_gps_setting">Include photo GPS</string>
+    <string name="photo_context_insert">Insert last photo context</string>
+    <string name="photo_context_unavailable">No recent photo context is available.</string>
+    <string name="photo_gps_explanation">Android may ask for permission to read location already embedded in selected photos. The app never reads your current location.</string>
 </resources>

@@ -67,3 +67,11 @@ If you find a bug, please open an issue in the Github repository, assuming one d
 If you know the solution to a bug please report it in the corresponding issue and if possible modify the code and create a pull request.
 
 
+
+## Photo context fork
+
+This fork can attach original restaurant photos together with one `PHOTO_CONTEXT.txt` containing only capture time/source, EXIF offset, optional embedded GPS, and a conservative media type. Multi-selection order is preserved and images are never decoded, resized, recompressed, or rewritten. Ordinary file uploads remain unchanged.
+
+Photo context and embedded-GPS inclusion default to on and can be toggled from the WebView long-press menu. Denying media-location permission does not prevent photo upload. The context is kept only in memory and the app's short-lived cache; the app adds no analytics or external server and never sends a message automatically. If mixed photo/text attachment is rejected by the evolving ChatGPT UI, **Insert last photo context** appends the cached block to the existing composer draft without submitting it. See [the format](docs/PHOTO_CONTEXT_V1.md) and [manual test plan](docs/MANUAL_TEST_PLAN.md).
+
+This remains a fork of upstream [gptAssist](https://github.com/woheller69/gptassist) and retains its GPLv3 license and attribution.
