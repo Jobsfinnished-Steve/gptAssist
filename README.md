@@ -75,3 +75,7 @@ This fork can attach original restaurant photos together with one `PHOTO_CONTEXT
 Photo context and embedded-GPS inclusion default to on and can be toggled from the WebView long-press menu. Denying media-location permission does not prevent photo upload. The context is kept only in memory and the app's short-lived cache; the app adds no analytics or external server and never sends a message automatically. If mixed photo/text attachment is rejected by the evolving ChatGPT UI, **Insert last photo context** appends the cached block to the existing composer draft without submitting it. See [the format](docs/PHOTO_CONTEXT_V1.md) and [manual test plan](docs/MANUAL_TEST_PLAN.md).
 
 This remains a fork of upstream [gptAssist](https://github.com/woheller69/gptassist) and retains its GPLv3 license and attribution.
+
+### Download a debug APK from GitHub Actions
+
+Open the repository's **Actions** tab, select **Build Debug APK**, and choose **Run workflow**. After the run finishes, open it and download **gptassist-photo-context-debug-apk** from **Artifacts**. Extract the downloaded ZIP and install the APK; Android may require you to allow installation from unknown sources for the app used to open it.
