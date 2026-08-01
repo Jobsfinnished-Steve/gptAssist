@@ -84,15 +84,22 @@ public final class PhotoMetadataReader {
     }
 
     private Row query(Uri uri) {
-        String[] columns = {MediaStore.Images.ImageColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED,
-                MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME};
+        String[] columns;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            columns = new String[]{MediaStore.Images.ImageColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED,
+                    MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME};
+        } else {
+            columns = new String[]{MediaStore.Images.ImageColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED,
+                    MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME};
+        }
         Row row = new Row();
         try (Cursor cursor = resolver.query(uri, columns, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
                 row.dateTaken = number(cursor, MediaStore.Images.ImageColumns.DATE_TAKEN, false);
                 row.lastModified = number(cursor, MediaStore.MediaColumns.DATE_MODIFIED, true);
-                row.path = string(cursor, MediaStore.MediaColumns.RELATIVE_PATH) + "/" +
-                        string(cursor, MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME);
+                String relativePath = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        ? string(cursor, MediaStore.MediaColumns.RELATIVE_PATH) : "";
+                row.path = relativePath + "/" + string(cursor, MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME);
             }
         } catch (RuntimeException ignored) { /* provider may reject unsupported columns */ }
         if (row.lastModified == 0) {

@@ -16,41 +16,52 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class PhotoUploadCoordinator {
-    public static final int REQUEST_CODE = 8101;
+    private static final int REQUEST_CODE_BASE = 8100;
+    private static final int REQUEST_CODE_COUNT = 50000;
     private final Activity activity;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
-    private ValueCallback<Uri[]> callback;
-    private boolean imageRequest;
+    private final CallbackRequestRegistry<Uri[]> requests = new CallbackRequestRegistry<>();
+    private CallbackRequestRegistry.Request<Uri[]> currentRequest;
+    private int currentRequestCode;
     private volatile boolean destroyed;
     private String lastContext;
 
     public PhotoUploadCoordinator(Activity activity) { this.activity = activity; }
 
     public boolean show(ValueCallback<Uri[]> next, WebChromeClient.FileChooserParams params) {
-        finish(null);
-        callback = next;
-        imageRequest = acceptsImages(params.getAcceptTypes());
+        currentRequest = requests.begin(next::onReceiveValue);
+        currentRequestCode = REQUEST_CODE_BASE + 1
+                + (int) ((currentRequest.getGeneration() - 1) % REQUEST_CODE_COUNT);
+        boolean imageRequest = acceptsImages(params.getAcceptTypes());
         Intent intent;
         try { intent = params.createIntent(); } catch (RuntimeException e) { intent = new Intent(Intent.ACTION_GET_CONTENT); }
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         if (imageRequest && (intent.getType() == null || "*/*".equals(intent.getType()))) intent.setType("image/*");
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE);
-        try { activity.startActivityForResult(intent, REQUEST_CODE); }
-        catch (RuntimeException e) { finish(null); Toast.makeText(activity, R.string.photo_read_error, Toast.LENGTH_SHORT).show(); }
+        try { activity.startActivityForResult(intent, currentRequestCode); }
+        catch (RuntimeException e) { requests.complete(currentRequest, null); Toast.makeText(activity, R.string.photo_read_error, Toast.LENGTH_SHORT).show(); }
         return true;
     }
 
-    public void onActivityResult(int resultCode, Intent data, boolean contextEnabled, boolean includeGps) {
-        if (callback == null) return;
-        if (resultCode != Activity.RESULT_OK || data == null) { finish(null); return; }
-        List<Uri> selected = selectedUris(data);
-        if (selected.isEmpty()) { finish(null); return; }
-        if (!imageRequest || !contextEnabled) { finish(selected.toArray(new Uri[0])); return; }
-        executor.execute(() -> createResult(selected, includeGps));
+    public boolean handlesRequestCode(int requestCode) {
+        return requestCode > REQUEST_CODE_BASE && requestCode <= REQUEST_CODE_BASE + REQUEST_CODE_COUNT;
     }
 
-    private void createResult(List<Uri> selected, boolean includeGps) {
+    public void onActivityResult(int requestCode, int resultCode, Intent data, boolean contextEnabled, boolean includeGps) {
+        CallbackRequestRegistry.Request<Uri[]> request = currentRequest;
+        if (request == null || requestCode != currentRequestCode) return;
+        if (resultCode != Activity.RESULT_OK || data == null) { requests.complete(request, null); return; }
+        List<Uri> selected = selectedUris(data);
+        if (selected.isEmpty()) { requests.complete(request, null); return; }
+        if (!contextEnabled || !allSelectedUrisAreImages(selected)) {
+            requests.complete(request, selected.toArray(new Uri[0]));
+            return;
+        }
+        executor.execute(() -> createResult(request, selected, includeGps));
+    }
+
+    private void createResult(CallbackRequestRegistry.Request<Uri[]> request, List<Uri> selected, boolean includeGps) {
         PhotoMetadataReader reader = new PhotoMetadataReader(activity);
         List<PhotoContext> contexts = new ArrayList<>();
         boolean hadError = false;
@@ -63,25 +74,36 @@ public final class PhotoUploadCoordinator {
         try { contextUri = new PhotoContextFileStore(activity).write(text); }
         catch (Exception e) {
             boolean finalHadError = true;
-            main.post(() -> { if (!destroyed) { lastContext = text; finish(selected.toArray(new Uri[0])); warn(finalHadError); } });
+            main.post(() -> complete(request, selected.toArray(new Uri[0]), text, finalHadError));
             return;
         }
         ArrayList<Uri> result = new ArrayList<>(selected);
         result.add(contextUri);
         boolean finalHadError = hadError;
-        main.post(() -> { if (!destroyed) { lastContext = text; finish(result.toArray(new Uri[0])); warn(finalHadError); } });
+        main.post(() -> complete(request, result.toArray(new Uri[0]), text, finalHadError));
+    }
+
+    private void complete(CallbackRequestRegistry.Request<Uri[]> request, Uri[] result, String text, boolean hadError) {
+        if (!destroyed && requests.complete(request, result)) {
+            lastContext = text;
+            warn(hadError);
+        }
     }
 
     private void warn(boolean error) {
         if (error) Toast.makeText(activity, R.string.photo_partial_metadata_error, Toast.LENGTH_SHORT).show();
     }
     public String getLastContext() { return lastContext; }
-    public void destroy() { destroyed = true; finish(null); executor.shutdownNow(); }
+    public void destroy() { destroyed = true; requests.cancelActive(); currentRequest = null; executor.shutdownNow(); }
 
-    private void finish(Uri[] value) {
-        ValueCallback<Uri[]> current = callback;
-        callback = null;
-        if (current != null) current.onReceiveValue(value);
+    private boolean allSelectedUrisAreImages(List<Uri> selected) {
+        for (Uri uri : selected) {
+            String mimeType = null;
+            try { mimeType = activity.getContentResolver().getType(uri); }
+            catch (RuntimeException ignored) { /* extension fallback below */ }
+            if (!SelectedFileType.isImage(mimeType, uri.getLastPathSegment())) return false;
+        }
+        return true;
     }
     private static List<Uri> selectedUris(Intent intent) {
         ArrayList<Uri> result = new ArrayList<>();

@@ -276,7 +276,7 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request != null && request.isForMainFrame()) {
-                    Log.w(TAG, "[onReceivedError] " + error.getErrorCode() + ": " + error.getDescription() + " @ " + request.getUrl());
+                    logMainFrameError(request, error);
                 }
             }
         });
@@ -377,11 +377,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
-        if (requestCode == PhotoUploadCoordinator.REQUEST_CODE) {
+        if (uploadCoordinator.handlesRequestCode(requestCode)) {
             boolean includeGps = preferences.getBoolean(PREF_GPS, true)
                     && (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
                     || checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED);
-            uploadCoordinator.onActivityResult(resultCode, intent,
+            uploadCoordinator.onActivityResult(requestCode, resultCode, intent,
                     preferences.getBoolean(PREF_CONTEXT, true), includeGps);
         }
     }
@@ -487,7 +487,8 @@ public class MainActivity extends Activity {
     }
 
     private boolean needsPhotoLocationPermission(String[] acceptTypes) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !preferences.getBoolean(PREF_GPS, true)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !preferences.getBoolean(PREF_CONTEXT, true)
+                || !preferences.getBoolean(PREF_GPS, true)
                 || checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED) return false;
         boolean image = false;
         if (acceptTypes != null) for (String type : acceptTypes) if (type != null && type.startsWith("image/")) image = true;
@@ -511,6 +512,14 @@ public class MainActivity extends Activity {
         pendingPhotoCallback = null;
         pendingPhotoParams = null;
         if (callback != null && params != null) uploadCoordinator.show(callback, params);
+    }
+
+    private void logMainFrameError(WebResourceRequest request, WebResourceError error) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Log.w(TAG, "[onReceivedError] " + error.getErrorCode() + ": " + error.getDescription() + " @ " + request.getUrl());
+        } else {
+            Log.w(TAG, "[onReceivedError] Main-frame load failed @ " + request.getUrl());
+        }
     }
 
 }

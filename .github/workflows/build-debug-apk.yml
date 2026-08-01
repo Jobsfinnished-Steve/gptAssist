@@ -32,7 +32,13 @@ jobs:
         run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Run debug lint
-        run: ./gradlew lintDebug --stacktrace
+        shell: bash
+        run: |
+          if ! ./gradlew lintDebug --stacktrace; then
+            echo "===== FULL LINT REPORT ====="
+            cat app/build/intermediates/lint_intermediate_text_report/debug/lint-results-debug.txt || true
+            exit 1
+          fi
 
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --stacktrace
