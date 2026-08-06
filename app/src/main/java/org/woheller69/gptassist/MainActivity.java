@@ -55,6 +55,8 @@ import android.widget.Toast;
 import android.webkit.ValueCallback;
 import android.net.Uri;
 
+import androidx.annotation.RequiresApi;
+import androidx.core.app.ActivityCompat;
 import androidx.webkit.URLUtilCompat;
 
 import org.woheller69.freeDroidWarn.FreeDroidWarn;
@@ -169,7 +171,8 @@ public class MainActivity extends Activity {
 
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
-                if (needsPhotoLocationPermission(fileChooserParams.getAcceptTypes())) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        && needsPhotoLocationPermission(fileChooserParams.getAcceptTypes())) {
                     if (pendingPhotoCallback != null) pendingPhotoCallback.onReceiveValue(null);
                     pendingPhotoCallback = filePathCallback;
                     pendingPhotoParams = fileChooserParams;
@@ -486,8 +489,9 @@ public class MainActivity extends Activity {
         if (requestCode == MEDIA_LOCATION_PERMISSION_CODE) launchPendingPhotoChooser();
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private boolean needsPhotoLocationPermission(String[] acceptTypes) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !preferences.getBoolean(PREF_CONTEXT, true)
+        if (!preferences.getBoolean(PREF_CONTEXT, true)
                 || !preferences.getBoolean(PREF_GPS, true)
                 || checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED) return false;
         boolean image = false;
@@ -495,15 +499,21 @@ public class MainActivity extends Activity {
         return image;
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private void explainAndRequestPhotoLocation() {
         if (!preferences.getBoolean(PREF_GPS_EXPLAINED, false)) {
             preferences.edit().putBoolean(PREF_GPS_EXPLAINED, true).apply();
             new AlertDialog.Builder(this).setMessage(R.string.photo_gps_explanation)
-                    .setPositiveButton(android.R.string.ok, (dialog, which) -> requestPermissions(
-                            new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, MEDIA_LOCATION_PERMISSION_CODE))
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> requestPhotoLocationPermission())
                     .setNegativeButton(android.R.string.cancel, (dialog, which) -> launchPendingPhotoChooser())
                     .setOnCancelListener(dialog -> launchPendingPhotoChooser()).show();
-        } else requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, MEDIA_LOCATION_PERMISSION_CODE);
+        } else requestPhotoLocationPermission();
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private void requestPhotoLocationPermission() {
+        ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, MEDIA_LOCATION_PERMISSION_CODE);
     }
 
     private void launchPendingPhotoChooser() {
