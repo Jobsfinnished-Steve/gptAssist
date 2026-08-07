@@ -208,15 +208,10 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
                     Log.d(TAG, "[shouldInterceptRequest][NON-HTTPS] Blocked access to " + request.getUrl().toString());
                     return new WebResourceResponse("text/javascript", "UTF-8", null); //Deny URLs that aren't HTTPS
                 }
-                boolean allowed = false;
-                for (String url : allowedDomains) {
-                    if (request.getUrl().getHost().endsWith(url)) {
-                        allowed = true;
-                    }
-                }
+                boolean allowed = AllowedHostMatcher.isAllowed(request.getUrl().getHost(), allowedDomains);
                 if (!allowed) {
                     Log.d(TAG, "[shouldInterceptRequest][NOT ON ALLOWLIST] Blocked access to " + request.getUrl().getHost());
-                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("accounts.google.com") || request.getUrl().getHost().equals("appleid.apple.com")){
+                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("appleid.apple.com")){
                         // ✅ Post ALL UI/WebView operations to main thread
                         view.post(() -> {
                             Toast.makeText(context, context.getString(R.string.error_microsoft_google), Toast.LENGTH_LONG).show();
@@ -248,15 +243,10 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
                     Log.d(TAG, "[shouldOverrideUrlLoading][NON-HTTPS] Blocked access to " + request.getUrl().toString());
                     return true; //Deny URLs that aren't HTTPS
                 }
-                boolean allowed = false;
-                for (String url : allowedDomains) {
-                    if (request.getUrl().getHost().endsWith(url)) {
-                        allowed = true;
-                    }
-                }
+                boolean allowed = AllowedHostMatcher.isAllowed(request.getUrl().getHost(), allowedDomains);
                 if (!allowed) {
                     Log.d(TAG, "[shouldOverrideUrlLoading][NOT ON ALLOWLIST] Blocked access to " + request.getUrl().getHost());
-                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("accounts.google.com") || request.getUrl().getHost().equals("appleid.apple.com")){
+                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("appleid.apple.com")){
                         // ✅ Post ALL UI/WebView operations to main thread
                         view.post(() -> {
                             Toast.makeText(context, context.getString(R.string.error_microsoft_google), Toast.LENGTH_LONG).show();
@@ -357,6 +347,7 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
 
     private static void initURLs() {
         //Allowed Domains
+        allowedDomains.clear();
         allowedDomains.add("cdn.auth0.com");
         allowedDomains.add("auth.openai.com");
         allowedDomains.add("chatgpt.com");
@@ -364,6 +355,15 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
         allowedDomains.add("fileserviceuploadsperm.blob.core.windows.net");
         allowedDomains.add("cdn.oaistatic.com");
         allowedDomains.add("oaiusercontent.com");
+        // Google OAuth navigation and the static resources used by its account pages.
+        allowedDomains.add("accounts.google.com");
+        allowedDomains.add("accounts.googleusercontent.com");
+        allowedDomains.add("apis.google.com");
+        allowedDomains.add("oauth2.googleapis.com");
+        allowedDomains.add("ssl.gstatic.com");
+        allowedDomains.add("www.gstatic.com");
+        allowedDomains.add("fonts.googleapis.com");
+        allowedDomains.add("fonts.gstatic.com");
 
     }
 
@@ -431,13 +431,7 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
                 }
                 String host = Uri.parse(url).getHost();
                 if (host != null) {
-                    boolean allowed = false;
-                    for (String domain : allowedDomains) {
-                        if (host.endsWith(domain)) {
-                            allowed = true;
-                            break;
-                        }
-                    }
+                    boolean allowed = AllowedHostMatcher.isAllowed(host, allowedDomains);
                     if (!allowed) {  //Copy URLs that are not allowed to open to clipboard
                         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                         ClipData clip = ClipData.newPlainText(getString(R.string.app_name), url);
