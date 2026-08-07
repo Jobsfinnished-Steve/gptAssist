@@ -65,7 +65,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 
-public class MainActivity extends Activity implements PhotoUploadCoordinator.MediaLocationPermissionDelegate {
+public class MainActivity extends Activity implements PhotoUploadCoordinator.Delegate {
 
     private WebView chatWebView = null;
     private ImageButton restrictedButton = null;
@@ -87,6 +87,7 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
     private static final int MEDIA_LOCATION_PERMISSION_CODE = 8102;
     private long activeMediaLocationGeneration = -1;
     private long waitingMediaLocationGeneration = -1;
+    private final GenerationDeduplicator composerContextGenerations = new GenerationDeduplicator();
 
     @Override
     protected void onPause() {
@@ -171,7 +172,8 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
 
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
-                return uploadCoordinator.show(filePathCallback, fileChooserParams);
+                return uploadCoordinator.show(filePathCallback, fileChooserParams,
+                        preferences.getBoolean(PREF_CONTEXT, true), preferences.getBoolean(PREF_GPS, true));
             }
 
             @Override
@@ -471,6 +473,14 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Med
         if (requestCode == MEDIA_LOCATION_PERMISSION_CODE) {
             boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
             finishMediaLocationRequest(activeMediaLocationGeneration, granted);
+        }
+    }
+
+
+    @Override
+    public void onPhotoContextReady(long requestGeneration, String photoContext) {
+        if (composerContextGenerations.markIfNew(requestGeneration)) {
+            ChatGptComposerBridge.append(chatWebView, photoContext);
         }
     }
 

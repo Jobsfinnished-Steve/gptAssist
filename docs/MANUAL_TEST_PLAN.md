@@ -4,8 +4,8 @@ Use test media with non-sensitive synthetic metadata. For every image case, veri
 
 | # | Scenario | Expected result |
 |---|---|---|
-| 1 | One JPEG | JPEG and one context file attach. |
-| 2 | Multiple JPEGs | All originals and one context attach in chooser order. |
+| 1 | One JPEG | JPEG attaches and context is appended to the composer. |
+| 2 | Multiple JPEGs | All originals attach in chooser order and one context block is appended to the composer. |
 | 3 | Multi-select in Samsung Gallery | Selection order is retained. |
 | 4 | Multi-select in system picker | Selection order is retained. |
 | 5 | HEIC/HEIF | Original attaches; readable metadata is included. |
@@ -37,3 +37,16 @@ Also test picker cancellation during rotation/backgrounding, rapid duplicate cho
 3. Deny access and confirm `gps=none` and `gps_altitude_m=none` while the original photo still attaches.
 4. Select a photo with coordinates but no altitude and confirm coordinates remain while `gps_altitude_m=none`.
 5. Confirm permission handling does not reopen the picker and completes the WebView callback exactly once.
+
+## Android 16 / Galaxy S23 v3 delivery matrix
+
+| Test | Scenario | Expected result |
+|---|---|---|
+| A | Samsung camera photo known to contain GPS; grant media-location access | Coordinates and `gps_status=AVAILABLE`; altitude appears when its EXIF tags exist. |
+| B | Same photo; deny media-location access | Photo still attaches; `gps=none`, `gps_altitude_m=none`, `gps_status=PERMISSION_DENIED`. |
+| C | Photo without GPS with successful original access | `gps=none`, `gps_altitude_m=none`, `gps_status=NO_GPS_TAG`. |
+| D | Original metadata access unavailable | Capture date remains when readable; location fields are `none` and `gps_status=ORIGINAL_ACCESS_FAILED`. |
+| E | Select two photos | Exactly two image attachments, no TXT attachment, v3 context in composer, and first URI maps to `IMAGE_001`. |
+| F | Type a draft before selecting images | Draft remains, two newlines and v3 context are appended, and nothing is sent automatically. |
+
+On API 36 the GPS-enabled image-library path must use `ACTION_OPEN_DOCUMENT`. Confirm permission handling never reopens the picker and that selecting multiple images preserves `ClipData` order.

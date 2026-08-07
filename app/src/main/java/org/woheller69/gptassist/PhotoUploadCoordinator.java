@@ -17,15 +17,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class PhotoUploadCoordinator {
-    public interface MediaLocationPermissionDelegate {
+    public interface Delegate {
         boolean isMediaLocationPermissionGranted();
         void requestMediaLocationPermission(long requestGeneration);
+        void onPhotoContextReady(long requestGeneration, String context);
     }
 
     private static final int REQUEST_CODE_BASE = 8100;
     private static final int REQUEST_CODE_COUNT = 50000;
     private final Activity activity;
-    private final MediaLocationPermissionDelegate permissionDelegate;
+    private final Delegate delegate;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final CallbackRequestRegistry<Uri[]> requests = new CallbackRequestRegistry<>();
@@ -35,21 +36,29 @@ public final class PhotoUploadCoordinator {
     private volatile boolean destroyed;
     private String lastContext;
 
-    public PhotoUploadCoordinator(Activity activity, MediaLocationPermissionDelegate permissionDelegate) {
+    public PhotoUploadCoordinator(Activity activity, Delegate delegate) {
         this.activity = activity;
-        this.permissionDelegate = permissionDelegate;
+        this.delegate = delegate;
     }
 
-    public boolean show(ValueCallback<Uri[]> next, WebChromeClient.FileChooserParams params) {
+    public boolean show(ValueCallback<Uri[]> next, WebChromeClient.FileChooserParams params, boolean contextEnabled, boolean includeGps) {
         pendingPermissions.clear();
         currentRequest = requests.begin(next::onReceiveValue);
         currentRequestCode = REQUEST_CODE_BASE + 1
                 + (int) ((currentRequest.getGeneration() - 1) % REQUEST_CODE_COUNT);
+        boolean imageLibraryRequest = PhotoChooserDecision.useOpenDocument(contextEnabled, includeGps,
+                acceptsImages(params.getAcceptTypes()), params.isCaptureEnabled(), Build.VERSION.SDK_INT);
         Intent intent;
-        try { intent = params.createIntent(); } catch (RuntimeException e) { intent = new Intent(Intent.ACTION_GET_CONTENT); }
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        if (acceptsImages(params.getAcceptTypes()) && (intent.getType() == null || "*/*".equals(intent.getType()))) {
+        if (imageLibraryRequest) {
+            intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("image/*");
+        } else {
+            try { intent = params.createIntent(); }
+            catch (RuntimeException e) { intent = new Intent(Intent.ACTION_GET_CONTENT); }
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            if (acceptsImages(params.getAcceptTypes())
+                    && (intent.getType() == null || "*/*".equals(intent.getType()))) intent.setType("image/*");
         }
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE);
         try { activity.startActivityForResult(intent, currentRequestCode); }
@@ -77,9 +86,9 @@ public final class PhotoUploadCoordinator {
         }
         if (PhotoPermissionDecision.shouldRequest(contextEnabled, includeGps, allImages,
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
-                permissionDelegate.isMediaLocationPermissionGranted())) {
+                delegate.isMediaLocationPermissionGranted())) {
             pendingPermissions.retain(request.getGeneration(), new PendingSelection(request, selected));
-            permissionDelegate.requestMediaLocationPermission(request.getGeneration());
+            delegate.requestMediaLocationPermission(request.getGeneration());
             return;
         }
         executor.execute(() -> createResult(request, selected, includeGps, false));
@@ -102,22 +111,17 @@ public final class PhotoUploadCoordinator {
             try { contexts.add(reader.read(uri, includeGps, gpsPermissionDenied)); }
             catch (RuntimeException e) { contexts.add(PhotoContext.unknown()); hadError = true; }
         }
-        String text = PhotoContextFormatter.format(contexts);
-        Uri contextUri;
-        try { contextUri = new PhotoContextFileStore(activity).write(text); }
-        catch (Exception e) {
-            main.post(() -> complete(request, selected.toArray(new Uri[0]), text, true));
-            return;
-        }
-        ArrayList<Uri> result = new ArrayList<>(selected);
-        result.add(contextUri);
+        PhotoUploadDelivery<Uri> delivery = new PhotoUploadDelivery<>(selected,
+                PhotoContextFormatter.format(contexts));
         boolean finalHadError = hadError;
-        main.post(() -> complete(request, result.toArray(new Uri[0]), text, finalHadError));
+        main.post(() -> complete(request, delivery.attachments.toArray(new Uri[0]),
+                delivery.context, finalHadError));
     }
 
     private void complete(CallbackRequestRegistry.Request<Uri[]> request, Uri[] result, String text, boolean hadError) {
         if (!destroyed && requests.complete(request, result)) {
             lastContext = text;
+            delegate.onPhotoContextReady(request.getGeneration(), text);
             if (hadError) Toast.makeText(activity, R.string.photo_partial_metadata_error, Toast.LENGTH_SHORT).show();
         }
     }

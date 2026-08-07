@@ -25,10 +25,18 @@ final class MediaUriResolver {
         return uri;
     }
 
+    static boolean isMediaDocumentsAuthority(String authority) {
+        return MEDIA_DOCUMENTS.equals(authority);
+    }
+
     static boolean supportsRequireOriginal(Uri uri) {
-        if (uri == null || !"content".equals(uri.getScheme())) return false;
-        String authority = uri.getAuthority();
-        return "media".equals(authority) || (authority != null && authority.startsWith("com.android.providers.media"));
+        return uri != null && supportsRequireOriginal(uri.getScheme(), uri.getAuthority());
+    }
+
+    static boolean supportsRequireOriginal(String scheme, String authority) {
+        return "content".equals(scheme)
+                && ("media".equals(authority)
+                || (authority != null && authority.startsWith("com.android.providers.media")));
     }
 
     static String mediaImageId(String documentId) {

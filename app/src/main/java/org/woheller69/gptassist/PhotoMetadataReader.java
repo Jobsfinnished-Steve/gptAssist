@@ -2,11 +2,14 @@ package org.woheller69.gptassist;
 
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
+import android.util.Log;
 
 import androidx.exifinterface.media.ExifInterface;
 
@@ -41,9 +44,8 @@ public final class PhotoMetadataReader {
         Double longitude = null;
         Double altitude = null;
         boolean cameraExif = false;
-        PhotoContext.GpsReadStatus gpsStatus = includeGps
-                ? access.gpsStatus : (gpsPermissionDenied ? PhotoContext.GpsReadStatus.PERMISSION_DENIED
-                : PhotoContext.GpsReadStatus.NOT_REQUESTED);
+        PhotoContext.GpsReadStatus gpsStatus = GpsAccessOutcome.status(includeGps,
+                gpsPermissionDenied, access.originalMetadataAvailable, access.exif != null);
 
         if (exif != null) {
             captured = ExifDateParser.parse(exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL),
@@ -92,31 +94,82 @@ public final class PhotoMetadataReader {
     }
 
     private OriginalAccess openExif(Uri selectedUri, Uri mediaUri, boolean includeGps) {
-        Uri requested = selectedUri;
-        boolean original = !includeGps || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q;
-        PhotoContext.GpsReadStatus status = includeGps
-                ? PhotoContext.GpsReadStatus.UNSUPPORTED_PROVIDER : PhotoContext.GpsReadStatus.NOT_REQUESTED;
-        if (includeGps && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                && MediaUriResolver.supportsRequireOriginal(mediaUri)) {
-            try {
-                requested = MediaStore.setRequireOriginal(mediaUri);
-                original = true;
-            } catch (RuntimeException ignored) {
-                original = false;
-                status = PhotoContext.GpsReadStatus.READ_ERROR;
+        if (!includeGps) {
+            ExifInterface ordinary = openDirect(selectedUri, "DIRECT_URI");
+            return new OriginalAccess(ordinary, false);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Bundle options = new Bundle();
+            options.putBoolean(MediaStore.EXTRA_ACCEPT_ORIGINAL_MEDIA_FORMAT, true);
+            try (AssetFileDescriptor descriptor = resolver.openTypedAssetFileDescriptor(
+                    selectedUri, "image/*", options)) {
+                if (descriptor != null) {
+                    ExifInterface exif = new ExifInterface(descriptor.getFileDescriptor());
+                    diagnostic("OPEN_TYPED_ORIGINAL", "SUCCESS");
+                    return new OriginalAccess(exif, true);
+                }
+                diagnostic("OPEN_TYPED_ORIGINAL", "NO_DESCRIPTOR");
+            } catch (SecurityException e) {
+                diagnostic("OPEN_TYPED_ORIGINAL", "SECURITY_EXCEPTION");
+            } catch (IOException | RuntimeException e) {
+                diagnostic("OPEN_TYPED_ORIGINAL", "IO_ERROR");
             }
+        } else {
+            diagnostic("OPEN_TYPED_ORIGINAL", "UNSUPPORTED");
         }
-        try (InputStream input = resolver.openInputStream(requested)) {
-            if (input != null) return new OriginalAccess(new ExifInterface(input), original, status);
-        } catch (IOException | RuntimeException ignored) {
-            status = PhotoContext.GpsReadStatus.READ_ERROR;
+
+        ExifInterface ordinary = openDirect(selectedUri, "DIRECT_URI");
+        boolean selectedDocument = "content".equals(selectedUri.getScheme())
+                && DocumentsContract.isDocumentUri(context, selectedUri);
+        boolean mediaDocument = MediaUriResolver.isMediaDocumentsAuthority(selectedUri.getAuthority());
+        if (ordinary != null && selectedDocument && !mediaDocument) {
+            return new OriginalAccess(ordinary, true);
         }
-        if (!requested.equals(selectedUri)) {
-            try (InputStream input = resolver.openInputStream(selectedUri)) {
-                if (input != null) return new OriginalAccess(new ExifInterface(input), false, status);
-            } catch (IOException | RuntimeException ignored) { status = PhotoContext.GpsReadStatus.READ_ERROR; }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && mediaUri != null
+                && !mediaUri.equals(selectedUri) && MediaUriResolver.supportsRequireOriginal(mediaUri)) {
+            try {
+                Uri original = MediaStore.setRequireOriginal(mediaUri);
+                try (InputStream input = resolver.openInputStream(original)) {
+                    if (input != null) {
+                        ExifInterface exif = new ExifInterface(input);
+                        diagnostic("MEDIASTORE_REQUIRE_ORIGINAL", "SUCCESS");
+                        return new OriginalAccess(exif, true);
+                    }
+                    diagnostic("MEDIASTORE_REQUIRE_ORIGINAL", "NO_DESCRIPTOR");
+                }
+            } catch (SecurityException e) {
+                diagnostic("MEDIASTORE_REQUIRE_ORIGINAL", "SECURITY_EXCEPTION");
+            } catch (IOException | RuntimeException e) {
+                diagnostic("MEDIASTORE_REQUIRE_ORIGINAL", "IO_ERROR");
+            }
+        } else {
+            diagnostic("MEDIASTORE_REQUIRE_ORIGINAL", "UNSUPPORTED");
         }
-        return new OriginalAccess(null, false, status);
+
+        return new OriginalAccess(ordinary, false);
+    }
+
+    private ExifInterface openDirect(Uri uri, String attempt) {
+        try (InputStream input = resolver.openInputStream(uri)) {
+            if (input == null) {
+                diagnostic(attempt, "NO_DESCRIPTOR");
+                return null;
+            }
+            ExifInterface exif = new ExifInterface(input);
+            diagnostic(attempt, "SUCCESS");
+            return exif;
+        } catch (SecurityException e) {
+            diagnostic(attempt, "SECURITY_EXCEPTION");
+        } catch (IOException | RuntimeException e) {
+            diagnostic(attempt, "IO_ERROR");
+        }
+        return null;
+    }
+
+    private static void diagnostic(String attempt, String result) {
+        if (BuildConfig.DEBUG) Log.d("PhotoMetadataReader", attempt + " -> " + result);
     }
 
     private Row query(Uri uri) {
@@ -176,11 +229,9 @@ public final class PhotoMetadataReader {
     private static final class OriginalAccess {
         final ExifInterface exif;
         final boolean originalMetadataAvailable;
-        final PhotoContext.GpsReadStatus gpsStatus;
-        OriginalAccess(ExifInterface exif, boolean originalMetadataAvailable, PhotoContext.GpsReadStatus gpsStatus) {
+        OriginalAccess(ExifInterface exif, boolean originalMetadataAvailable) {
             this.exif = exif;
             this.originalMetadataAvailable = originalMetadataAvailable;
-            this.gpsStatus = gpsStatus;
         }
     }
     private static final class Row { long dateTaken; long lastModified; String path = ""; boolean empty = true; }

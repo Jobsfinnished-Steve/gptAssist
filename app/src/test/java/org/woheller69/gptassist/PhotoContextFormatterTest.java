@@ -18,7 +18,7 @@ public class PhotoContextFormatterTest {
     @Test public void formatsSinglePhotoAndRequiredOrdering() {
         String text = PhotoContextFormatter.format(Collections.singletonList(full()));
         assertTrue(text.contains("[IMAGE_001]\ncaptured_at=2026-07-30T18:42:13.12\nutc_offset=+09:00\n"
-                + "timestamp_source=EXIF_DATETIME_ORIGINAL\ngps=12.345679,-98.1\ngps_altitude_m=42.3\nmedia_type=CAMERA_PHOTO\n"));
+                + "timestamp_source=EXIF_DATETIME_ORIGINAL\ngps=12.345679,-98.1\ngps_altitude_m=42.3\ngps_status=AVAILABLE\nmedia_type=CAMERA_PHOTO\n"));
         assertTrue(text.endsWith("\n"));
         assertFalse(text.contains("\r"));
     }
@@ -27,7 +27,7 @@ public class PhotoContextFormatterTest {
         String text = PhotoContextFormatter.format(Arrays.asList(full(), PhotoContext.unknown(), full()));
         assertTrue(text.indexOf("IMAGE_001") < text.indexOf("IMAGE_002"));
         assertTrue(text.indexOf("IMAGE_002") < text.indexOf("IMAGE_003"));
-        assertTrue(text.contains("gps=none\ngps_altitude_m=none\nmedia_type=UNKNOWN"));
+        assertTrue(text.contains("gps=none\ngps_altitude_m=none\ngps_status=READ_ERROR\nmedia_type=UNKNOWN"));
         assertEquals(3, count(text, "[IMAGE_"));
     }
 
@@ -55,14 +55,29 @@ public class PhotoContextFormatterTest {
         PhotoContext missing = new PhotoContext("unknown", "unknown", PhotoContext.TimestampSource.UNKNOWN,
                 1.0, 2.0, Double.NaN, PhotoContext.MediaType.UNKNOWN);
         assertTrue(PhotoContextFormatter.format(Collections.singletonList(missing))
-                .contains("gps=1,2\ngps_altitude_m=none\nmedia_type=UNKNOWN"));
+                .contains("gps=1,2\ngps_altitude_m=none\ngps_status=AVAILABLE\nmedia_type=UNKNOWN"));
     }
 
-    @Test public void versionTwoAndExactlyOneFinalNewline() {
+    @Test public void versionThreeAndExactlyOneFinalNewline() {
         String text = PhotoContextFormatter.format(Collections.singletonList(full()));
-        assertTrue(text.startsWith("PHOTO_CONTEXT v2\n"));
+        assertTrue(text.startsWith("PHOTO_CONTEXT v3\n"));
         assertTrue(text.endsWith("\n"));
         assertFalse(text.endsWith("\n\n"));
+    }
+
+
+    @Test public void formatsGpsStatusesImmediatelyAfterAltitude() {
+        for (PhotoContext.GpsReadStatus status : new PhotoContext.GpsReadStatus[]{
+                PhotoContext.GpsReadStatus.AVAILABLE,
+                PhotoContext.GpsReadStatus.PERMISSION_DENIED,
+                PhotoContext.GpsReadStatus.ORIGINAL_ACCESS_FAILED,
+                PhotoContext.GpsReadStatus.NO_GPS_TAG,
+                PhotoContext.GpsReadStatus.GPS_DISABLED}) {
+            PhotoContext photo = new PhotoContext("unknown", "unknown", PhotoContext.TimestampSource.UNKNOWN,
+                    null, null, null, PhotoContext.MediaType.UNKNOWN, status);
+            String text = PhotoContextFormatter.format(Collections.singletonList(photo));
+            assertTrue(text.contains("gps_altitude_m=none\ngps_status=" + status.name() + "\nmedia_type="));
+        }
     }
 
     @Test public void oneFailedPhotoDoesNotRemoveOthers() {

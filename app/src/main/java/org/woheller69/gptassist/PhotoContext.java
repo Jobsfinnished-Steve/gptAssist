@@ -3,7 +3,7 @@ package org.woheller69.gptassist;
 public final class PhotoContext {
     public enum TimestampSource { EXIF_DATETIME_ORIGINAL, MEDIASTORE_DATE_TAKEN, FILE_LAST_MODIFIED, UNKNOWN }
     public enum MediaType { CAMERA_PHOTO, SCREENSHOT, DOWNLOADED, EDITED, UNKNOWN }
-    public enum GpsReadStatus { AVAILABLE, NOT_REQUESTED, PERMISSION_DENIED, UNSUPPORTED_PROVIDER, NO_GPS_TAG, READ_ERROR }
+    public enum GpsReadStatus { AVAILABLE, GPS_DISABLED, PERMISSION_DENIED, NO_GPS_TAG, ORIGINAL_ACCESS_FAILED, UNSUPPORTED_PROVIDER, READ_ERROR }
 
     public final String capturedAt;
     public final String utcOffset;
