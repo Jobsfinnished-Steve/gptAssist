@@ -65,7 +65,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements PhotoUploadCoordinator.MediaLocationPermissionDelegate {
 
     private WebView chatWebView = null;
     private ImageButton restrictedButton = null;
@@ -85,8 +85,8 @@ public class MainActivity extends Activity {
     private static final String PREF_GPS = "photo_gps_enabled";
     private static final String PREF_GPS_EXPLAINED = "photo_gps_explained";
     private static final int MEDIA_LOCATION_PERMISSION_CODE = 8102;
-    private ValueCallback<Uri[]> pendingPhotoCallback;
-    private WebChromeClient.FileChooserParams pendingPhotoParams;
+    private long activeMediaLocationGeneration = -1;
+    private long waitingMediaLocationGeneration = -1;
 
     @Override
     protected void onPause() {
@@ -147,7 +147,7 @@ public class MainActivity extends Activity {
         registerForContextMenu(chatWebView);
         restrictedButton = findViewById(R.id.restricted);
         preferences = getSharedPreferences("settings", MODE_PRIVATE);
-        uploadCoordinator = new PhotoUploadCoordinator(this);
+        uploadCoordinator = new PhotoUploadCoordinator(this, this);
         new PhotoContextFileStore(this).cleanup();
 
         //Set cookie options
@@ -171,14 +171,6 @@ public class MainActivity extends Activity {
 
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                        && needsPhotoLocationPermission(fileChooserParams.getAcceptTypes())) {
-                    if (pendingPhotoCallback != null) pendingPhotoCallback.onReceiveValue(null);
-                    pendingPhotoCallback = filePathCallback;
-                    pendingPhotoParams = fileChooserParams;
-                    explainAndRequestPhotoLocation();
-                    return true;
-                }
                 return uploadCoordinator.show(filePathCallback, fileChooserParams);
             }
 
@@ -325,8 +317,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (pendingPhotoCallback != null) pendingPhotoCallback.onReceiveValue(null);
-        pendingPhotoCallback = null;
         if (uploadCoordinator != null) uploadCoordinator.destroy();
         super.onDestroy();
     }
@@ -381,9 +371,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
         if (uploadCoordinator.handlesRequestCode(requestCode)) {
-            boolean includeGps = preferences.getBoolean(PREF_GPS, true)
-                    && (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-                    || checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED);
+            boolean includeGps = preferences.getBoolean(PREF_GPS, true);
             uploadCoordinator.onActivityResult(requestCode, resultCode, intent,
                     preferences.getBoolean(PREF_CONTEXT, true), includeGps);
         }
@@ -486,27 +474,44 @@ public class MainActivity extends Activity {
                 Toast.makeText(context, "Microphone permission denied.", Toast.LENGTH_SHORT).show();
             }
         }
-        if (requestCode == MEDIA_LOCATION_PERMISSION_CODE) launchPendingPhotoChooser();
+        if (requestCode == MEDIA_LOCATION_PERMISSION_CODE) {
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            finishMediaLocationRequest(activeMediaLocationGeneration, granted);
+        }
+    }
+
+    @Override
+    public boolean isMediaLocationPermissionGranted() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_MEDIA_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void requestMediaLocationPermission(long requestGeneration) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || !preferences.getBoolean(PREF_CONTEXT, true)
+                || !preferences.getBoolean(PREF_GPS, true)) {
+            uploadCoordinator.onMediaLocationPermissionResult(requestGeneration, false);
+            return;
+        }
+        if (activeMediaLocationGeneration != -1) {
+            waitingMediaLocationGeneration = requestGeneration;
+            return;
+        }
+        activeMediaLocationGeneration = requestGeneration;
+        explainAndRequestPhotoLocation(requestGeneration);
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private boolean needsPhotoLocationPermission(String[] acceptTypes) {
-        if (!preferences.getBoolean(PREF_CONTEXT, true)
-                || !preferences.getBoolean(PREF_GPS, true)
-                || checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED) return false;
-        boolean image = false;
-        if (acceptTypes != null) for (String type : acceptTypes) if (type != null && type.startsWith("image/")) image = true;
-        return image;
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private void explainAndRequestPhotoLocation() {
+    private void explainAndRequestPhotoLocation(long requestGeneration) {
         if (!preferences.getBoolean(PREF_GPS_EXPLAINED, false)) {
             preferences.edit().putBoolean(PREF_GPS_EXPLAINED, true).apply();
             new AlertDialog.Builder(this).setMessage(R.string.photo_gps_explanation)
                     .setPositiveButton(android.R.string.ok, (dialog, which) -> requestPhotoLocationPermission())
-                    .setNegativeButton(android.R.string.cancel, (dialog, which) -> launchPendingPhotoChooser())
-                    .setOnCancelListener(dialog -> launchPendingPhotoChooser()).show();
+                    .setNegativeButton(android.R.string.cancel,
+                            (dialog, which) -> finishMediaLocationRequest(requestGeneration, false))
+                    .setOnCancelListener(dialog -> finishMediaLocationRequest(requestGeneration, false)).show();
         } else requestPhotoLocationPermission();
     }
 
@@ -516,12 +521,19 @@ public class MainActivity extends Activity {
                 new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, MEDIA_LOCATION_PERMISSION_CODE);
     }
 
-    private void launchPendingPhotoChooser() {
-        ValueCallback<Uri[]> callback = pendingPhotoCallback;
-        WebChromeClient.FileChooserParams params = pendingPhotoParams;
-        pendingPhotoCallback = null;
-        pendingPhotoParams = null;
-        if (callback != null && params != null) uploadCoordinator.show(callback, params);
+    private void finishMediaLocationRequest(long requestGeneration, boolean granted) {
+        if (activeMediaLocationGeneration != requestGeneration) return;
+        activeMediaLocationGeneration = -1;
+        uploadCoordinator.onMediaLocationPermissionResult(requestGeneration, granted);
+        long waiting = waitingMediaLocationGeneration;
+        waitingMediaLocationGeneration = -1;
+        if (waiting != -1) {
+            if (isMediaLocationPermissionGranted()) {
+                uploadCoordinator.onMediaLocationPermissionResult(waiting, true);
+            } else {
+                requestMediaLocationPermission(waiting);
+            }
+        }
     }
 
     private void logMainFrameError(WebResourceRequest request, WebResourceError error) {

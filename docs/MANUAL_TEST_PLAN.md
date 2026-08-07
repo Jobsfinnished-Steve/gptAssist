@@ -10,8 +10,8 @@ Use test media with non-sensitive synthetic metadata. For every image case, veri
 | 4 | Multi-select in system picker | Selection order is retained. |
 | 5 | HEIC/HEIF | Original attaches; readable metadata is included. |
 | 6 | PNG screenshot | `SCREENSHOT` only when MediaStore path/bucket supports it. |
-| 7 | Photo with GPS | Coordinates appear with at most six decimals. |
-| 8 | Photo without GPS | `gps=none`. |
+| 7 | Photo with GPS | Coordinates appear with at most six decimals; EXIF altitude appears with at most one decimal. |
+| 8 | Photo without GPS | `gps=none` and `gps_altitude_m=none`. |
 | 9 | Allow media-location permission | Embedded GPS is read when the provider permits it. |
 | 10 | Deny media-location permission | Upload continues and GPS is omitted. |
 | 11 | Download without EXIF | MediaStore/file fallback is labeled accurately. |
@@ -29,3 +29,11 @@ Use test media with non-sensitive synthetic metadata. For every image case, veri
 | 23 | Original preservation | Compare size/hash before and after; no transform occurs. |
 
 Also test picker cancellation during rotation/backgrounding, rapid duplicate chooser requests, page reload, large batches, unreadable content URIs, and both context/GPS settings from the WebView long-press menu. These WebView, ChatGPT-login, Samsung-picker, mixed-MIME acceptance, and Android 16 checks are **not** considered verified until performed on a physical device.
+
+## Galaxy S23 / Android 16 GPS and altitude checks
+
+1. Select a camera photo that Samsung Gallery reports as having location and altitude. Confirm the media-location dialog appears only after selection.
+2. Allow access and confirm coordinates and `gps_altitude_m` are present when their EXIF tags exist.
+3. Deny access and confirm `gps=none` and `gps_altitude_m=none` while the original photo still attaches.
+4. Select a photo with coordinates but no altitude and confirm coordinates remain while `gps_altitude_m=none`.
+5. Confirm permission handling does not reopen the picker and completes the WebView callback exactly once.

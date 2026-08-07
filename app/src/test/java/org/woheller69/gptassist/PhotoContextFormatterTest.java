@@ -12,13 +12,13 @@ public class PhotoContextFormatterTest {
     private static PhotoContext full() {
         return new PhotoContext("2026-07-30T18:42:13.12", "+09:00",
                 PhotoContext.TimestampSource.EXIF_DATETIME_ORIGINAL,
-                12.3456789, -98.1, PhotoContext.MediaType.CAMERA_PHOTO);
+                12.3456789, -98.1, 42.34, PhotoContext.MediaType.CAMERA_PHOTO);
     }
 
     @Test public void formatsSinglePhotoAndRequiredOrdering() {
         String text = PhotoContextFormatter.format(Collections.singletonList(full()));
         assertTrue(text.contains("[IMAGE_001]\ncaptured_at=2026-07-30T18:42:13.12\nutc_offset=+09:00\n"
-                + "timestamp_source=EXIF_DATETIME_ORIGINAL\ngps=12.345679,-98.1\nmedia_type=CAMERA_PHOTO\n"));
+                + "timestamp_source=EXIF_DATETIME_ORIGINAL\ngps=12.345679,-98.1\ngps_altitude_m=42.3\nmedia_type=CAMERA_PHOTO\n"));
         assertTrue(text.endsWith("\n"));
         assertFalse(text.contains("\r"));
     }
@@ -27,7 +27,7 @@ public class PhotoContextFormatterTest {
         String text = PhotoContextFormatter.format(Arrays.asList(full(), PhotoContext.unknown(), full()));
         assertTrue(text.indexOf("IMAGE_001") < text.indexOf("IMAGE_002"));
         assertTrue(text.indexOf("IMAGE_002") < text.indexOf("IMAGE_003"));
-        assertTrue(text.contains("gps=none\nmedia_type=UNKNOWN"));
+        assertTrue(text.contains("gps=none\ngps_altitude_m=none\nmedia_type=UNKNOWN"));
         assertEquals(3, count(text, "[IMAGE_"));
     }
 
@@ -35,8 +35,34 @@ public class PhotoContextFormatterTest {
         Locale old = Locale.getDefault();
         try {
             Locale.setDefault(Locale.GERMANY);
-            assertTrue(PhotoContextFormatter.format(Collections.singletonList(full())).contains("gps=12.345679,-98.1"));
+            String text = PhotoContextFormatter.format(Collections.singletonList(full()));
+            assertTrue(text.contains("gps=12.345679,-98.1"));
+            assertTrue(text.contains("gps_altitude_m=42.3"));
         } finally { Locale.setDefault(old); }
+    }
+
+    @Test public void formatsAltitudeAboveBelowAndInteger() {
+        PhotoContext below = new PhotoContext("unknown", "unknown", PhotoContext.TimestampSource.UNKNOWN,
+                null, null, -12.5, PhotoContext.MediaType.UNKNOWN);
+        PhotoContext integer = new PhotoContext("unknown", "unknown", PhotoContext.TimestampSource.UNKNOWN,
+                null, null, 42.0, PhotoContext.MediaType.UNKNOWN);
+        String text = PhotoContextFormatter.format(Arrays.asList(below, integer));
+        assertTrue(text.contains("gps_altitude_m=-12.5"));
+        assertTrue(text.contains("gps_altitude_m=42"));
+    }
+
+    @Test public void missingOrNonFiniteAltitudeIsNone() {
+        PhotoContext missing = new PhotoContext("unknown", "unknown", PhotoContext.TimestampSource.UNKNOWN,
+                1.0, 2.0, Double.NaN, PhotoContext.MediaType.UNKNOWN);
+        assertTrue(PhotoContextFormatter.format(Collections.singletonList(missing))
+                .contains("gps=1,2\ngps_altitude_m=none\nmedia_type=UNKNOWN"));
+    }
+
+    @Test public void versionTwoAndExactlyOneFinalNewline() {
+        String text = PhotoContextFormatter.format(Collections.singletonList(full()));
+        assertTrue(text.startsWith("PHOTO_CONTEXT v2\n"));
+        assertTrue(text.endsWith("\n"));
+        assertFalse(text.endsWith("\n\n"));
     }
 
     @Test public void oneFailedPhotoDoesNotRemoveOthers() {

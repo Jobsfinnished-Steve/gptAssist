@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.webkit.ValueCallback;
@@ -16,31 +17,46 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class PhotoUploadCoordinator {
+    public interface MediaLocationPermissionDelegate {
+        boolean isMediaLocationPermissionGranted();
+        void requestMediaLocationPermission(long requestGeneration);
+    }
+
     private static final int REQUEST_CODE_BASE = 8100;
     private static final int REQUEST_CODE_COUNT = 50000;
     private final Activity activity;
+    private final MediaLocationPermissionDelegate permissionDelegate;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final CallbackRequestRegistry<Uri[]> requests = new CallbackRequestRegistry<>();
     private CallbackRequestRegistry.Request<Uri[]> currentRequest;
     private int currentRequestCode;
+    private final PendingPermissionRegistry<PendingSelection> pendingPermissions = new PendingPermissionRegistry<>();
     private volatile boolean destroyed;
     private String lastContext;
 
-    public PhotoUploadCoordinator(Activity activity) { this.activity = activity; }
+    public PhotoUploadCoordinator(Activity activity, MediaLocationPermissionDelegate permissionDelegate) {
+        this.activity = activity;
+        this.permissionDelegate = permissionDelegate;
+    }
 
     public boolean show(ValueCallback<Uri[]> next, WebChromeClient.FileChooserParams params) {
+        pendingPermissions.clear();
         currentRequest = requests.begin(next::onReceiveValue);
         currentRequestCode = REQUEST_CODE_BASE + 1
                 + (int) ((currentRequest.getGeneration() - 1) % REQUEST_CODE_COUNT);
-        boolean imageRequest = acceptsImages(params.getAcceptTypes());
         Intent intent;
         try { intent = params.createIntent(); } catch (RuntimeException e) { intent = new Intent(Intent.ACTION_GET_CONTENT); }
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        if (imageRequest && (intent.getType() == null || "*/*".equals(intent.getType()))) intent.setType("image/*");
+        if (acceptsImages(params.getAcceptTypes()) && (intent.getType() == null || "*/*".equals(intent.getType()))) {
+            intent.setType("image/*");
+        }
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE);
         try { activity.startActivityForResult(intent, currentRequestCode); }
-        catch (RuntimeException e) { requests.complete(currentRequest, null); Toast.makeText(activity, R.string.photo_read_error, Toast.LENGTH_SHORT).show(); }
+        catch (RuntimeException e) {
+            requests.complete(currentRequest, null);
+            Toast.makeText(activity, R.string.photo_read_error, Toast.LENGTH_SHORT).show();
+        }
         return true;
     }
 
@@ -54,27 +70,43 @@ public final class PhotoUploadCoordinator {
         if (resultCode != Activity.RESULT_OK || data == null) { requests.complete(request, null); return; }
         List<Uri> selected = selectedUris(data);
         if (selected.isEmpty()) { requests.complete(request, null); return; }
-        if (!contextEnabled || !allSelectedUrisAreImages(selected)) {
+        boolean allImages = allSelectedUrisAreImages(selected);
+        if (!contextEnabled || !allImages) {
             requests.complete(request, selected.toArray(new Uri[0]));
             return;
         }
-        executor.execute(() -> createResult(request, selected, includeGps));
+        if (PhotoPermissionDecision.shouldRequest(contextEnabled, includeGps, allImages,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+                permissionDelegate.isMediaLocationPermissionGranted())) {
+            pendingPermissions.retain(request.getGeneration(), new PendingSelection(request, selected));
+            permissionDelegate.requestMediaLocationPermission(request.getGeneration());
+            return;
+        }
+        executor.execute(() -> createResult(request, selected, includeGps, false));
     }
 
-    private void createResult(CallbackRequestRegistry.Request<Uri[]> request, List<Uri> selected, boolean includeGps) {
+    public void onMediaLocationPermissionResult(long requestGeneration, boolean granted) {
+        PendingPermissionRegistry.Pending<PendingSelection> retained = pendingPermissions.consume(requestGeneration);
+        if (retained == null) return;
+        PendingSelection pending = retained.value;
+        if (currentRequest != pending.request) return;
+        executor.execute(() -> createResult(pending.request, pending.selected, granted, !granted));
+    }
+
+    private void createResult(CallbackRequestRegistry.Request<Uri[]> request, List<Uri> selected,
+                              boolean includeGps, boolean gpsPermissionDenied) {
         PhotoMetadataReader reader = new PhotoMetadataReader(activity);
         List<PhotoContext> contexts = new ArrayList<>();
         boolean hadError = false;
         for (Uri uri : selected) {
-            try { contexts.add(reader.read(uri, includeGps)); }
+            try { contexts.add(reader.read(uri, includeGps, gpsPermissionDenied)); }
             catch (RuntimeException e) { contexts.add(PhotoContext.unknown()); hadError = true; }
         }
         String text = PhotoContextFormatter.format(contexts);
         Uri contextUri;
         try { contextUri = new PhotoContextFileStore(activity).write(text); }
         catch (Exception e) {
-            boolean finalHadError = true;
-            main.post(() -> complete(request, selected.toArray(new Uri[0]), text, finalHadError));
+            main.post(() -> complete(request, selected.toArray(new Uri[0]), text, true));
             return;
         }
         ArrayList<Uri> result = new ArrayList<>(selected);
@@ -86,15 +118,18 @@ public final class PhotoUploadCoordinator {
     private void complete(CallbackRequestRegistry.Request<Uri[]> request, Uri[] result, String text, boolean hadError) {
         if (!destroyed && requests.complete(request, result)) {
             lastContext = text;
-            warn(hadError);
+            if (hadError) Toast.makeText(activity, R.string.photo_partial_metadata_error, Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void warn(boolean error) {
-        if (error) Toast.makeText(activity, R.string.photo_partial_metadata_error, Toast.LENGTH_SHORT).show();
-    }
     public String getLastContext() { return lastContext; }
-    public void destroy() { destroyed = true; requests.cancelActive(); currentRequest = null; executor.shutdownNow(); }
+    public void destroy() {
+        destroyed = true;
+        pendingPermissions.clear();
+        requests.cancelActive();
+        currentRequest = null;
+        executor.shutdownNow();
+    }
 
     private boolean allSelectedUrisAreImages(List<Uri> selected) {
         for (Uri uri : selected) {
@@ -109,14 +144,23 @@ public final class PhotoUploadCoordinator {
         ArrayList<Uri> result = new ArrayList<>();
         ClipData clip = intent.getClipData();
         if (clip != null) for (int i = 0; i < clip.getItemCount(); i++) {
-            Uri uri = clip.getItemAt(i).getUri(); if (uri != null) result.add(uri);
-        }
-        else if (intent.getData() != null) result.add(intent.getData());
+            Uri uri = clip.getItemAt(i).getUri();
+            if (uri != null) result.add(uri);
+        } else if (intent.getData() != null) result.add(intent.getData());
         return result;
     }
     private static boolean acceptsImages(String[] types) {
         if (types == null || types.length == 0) return false;
-        for (String type : types) if (type != null && (type.startsWith("image/") || "image/*".equals(type))) return true;
+        for (String type : types) if (type != null && type.startsWith("image/")) return true;
         return false;
+    }
+
+    private static final class PendingSelection {
+        final CallbackRequestRegistry.Request<Uri[]> request;
+        final List<Uri> selected;
+        PendingSelection(CallbackRequestRegistry.Request<Uri[]> request, List<Uri> selected) {
+            this.request = request;
+            this.selected = new ArrayList<>(selected);
+        }
     }
 }

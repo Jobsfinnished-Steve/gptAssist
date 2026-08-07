@@ -10,7 +10,7 @@ public final class PhotoContextFormatter {
 
     public static String format(List<PhotoContext> photos) {
         StringBuilder out = new StringBuilder();
-        out.append("PHOTO_CONTEXT v1\n")
+        out.append("PHOTO_CONTEXT v2\n")
                 .append("This metadata describes the selected image attachments only.\n")
                 .append("Images correspond to IMAGE_001, IMAGE_002, ... in the same order in which they were selected.\n")
                 .append("PHOTO_CONTEXT.txt itself is not included in the image numbering.\n\n");
@@ -23,10 +23,17 @@ public final class PhotoContextFormatter {
             out.append("gps=");
             if (photo.latitude == null || photo.longitude == null) out.append("none");
             else out.append(decimal(photo.latitude)).append(',').append(decimal(photo.longitude));
+            out.append('\n').append("gps_altitude_m=");
+            if (photo.gpsAltitudeMeters == null) out.append("none");
+            else out.append(altitude(photo.gpsAltitudeMeters));
             out.append('\n').append("media_type=").append(photo.mediaType.name()).append('\n');
             if (i + 1 < photos.size()) out.append('\n');
         }
         return out.toString();
+    }
+
+    private static String altitude(double value) {
+        return BigDecimal.valueOf(value).setScale(1, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 
     private static String decimal(double value) {

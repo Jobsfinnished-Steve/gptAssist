@@ -10,9 +10,9 @@ import android.provider.MediaStore;
 
 import androidx.exifinterface.media.ExifInterface;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -27,24 +27,24 @@ public final class PhotoMetadataReader {
     }
 
     public PhotoContext read(Uri uri, boolean includeGps) {
-        Uri metadataUri = originalUri(uri, includeGps);
-        ExifInterface exif = null;
-        try (InputStream input = resolver.openInputStream(metadataUri)) {
-            if (input != null) exif = new ExifInterface(input);
-        } catch (IOException | RuntimeException ignored) {
-            if (!metadataUri.equals(uri)) {
-                try (InputStream input = resolver.openInputStream(uri)) {
-                    if (input != null) exif = new ExifInterface(input);
-                } catch (IOException | RuntimeException ignoredAgain) { /* fallbacks below */ }
-            }
-        }
+        return read(uri, includeGps, false);
+    }
 
+    public PhotoContext read(Uri uri, boolean includeGps, boolean gpsPermissionDenied) {
+        Uri mediaUri = MediaUriResolver.toMediaStoreImage(context, uri);
+        OriginalAccess access = openExif(uri, mediaUri, includeGps);
+        ExifInterface exif = access.exif;
         String captured = null;
         String offset = "unknown";
         PhotoContext.TimestampSource source = PhotoContext.TimestampSource.UNKNOWN;
         Double latitude = null;
         Double longitude = null;
+        Double altitude = null;
         boolean cameraExif = false;
+        PhotoContext.GpsReadStatus gpsStatus = includeGps
+                ? access.gpsStatus : (gpsPermissionDenied ? PhotoContext.GpsReadStatus.PERMISSION_DENIED
+                : PhotoContext.GpsReadStatus.NOT_REQUESTED);
+
         if (exif != null) {
             captured = ExifDateParser.parse(exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL),
                     exif.getAttribute(ExifInterface.TAG_SUBSEC_TIME_ORIGINAL));
@@ -52,19 +52,33 @@ public final class PhotoMetadataReader {
                 source = PhotoContext.TimestampSource.EXIF_DATETIME_ORIGINAL;
                 offset = ExifDateParser.normalizeOffset(exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL));
             }
-            cameraExif = exif.getAttribute(ExifInterface.TAG_MAKE) != null || exif.getAttribute(ExifInterface.TAG_MODEL) != null;
-            if (includeGps) {
-                float[] location = new float[2];
+            cameraExif = exif.getAttribute(ExifInterface.TAG_MAKE) != null
+                    || exif.getAttribute(ExifInterface.TAG_MODEL) != null;
+            if (includeGps && access.originalMetadataAvailable) {
                 try {
+                    float[] location = new float[2];
                     if (exif.getLatLong(location)) {
                         latitude = (double) location[0];
                         longitude = (double) location[1];
                     }
-                } catch (RuntimeException ignored) { /* GPS remains absent */ }
+                    boolean hasAltitude = exif.getAttribute(ExifInterface.TAG_GPS_ALTITUDE) != null;
+                    boolean hasAltitudeRef = exif.getAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF) != null;
+                    altitude = GpsAltitudeValue.validated(hasAltitude, hasAltitudeRef,
+                            exif.getAltitude(Double.NaN));
+                    if (latitude == null || longitude == null) altitude = null;
+                    gpsStatus = latitude != null && longitude != null
+                            ? PhotoContext.GpsReadStatus.AVAILABLE : PhotoContext.GpsReadStatus.NO_GPS_TAG;
+                } catch (RuntimeException ignored) {
+                    latitude = null;
+                    longitude = null;
+                    altitude = null;
+                    gpsStatus = PhotoContext.GpsReadStatus.READ_ERROR;
+                }
             }
         }
 
-        Row row = query(uri);
+        Row row = query(mediaUri);
+        if (row.empty) row = query(uri);
         if (captured == null && validEpoch(row.dateTaken)) {
             captured = epoch(row.dateTaken);
             source = PhotoContext.TimestampSource.MEDIASTORE_DATE_TAKEN;
@@ -73,41 +87,65 @@ public final class PhotoMetadataReader {
             captured = epoch(row.lastModified);
             source = PhotoContext.TimestampSource.FILE_LAST_MODIFIED;
         }
-        return new PhotoContext(captured, offset, source, latitude, longitude, classify(row.path, cameraExif));
+        return new PhotoContext(captured, offset, source, latitude, longitude, altitude,
+                classify(row.path, cameraExif), gpsStatus);
     }
 
-    private Uri originalUri(Uri uri, boolean includeGps) {
-        if (includeGps && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && "content".equals(uri.getScheme())) {
-            try { return MediaStore.setRequireOriginal(uri); } catch (RuntimeException ignored) { return uri; }
+    private OriginalAccess openExif(Uri selectedUri, Uri mediaUri, boolean includeGps) {
+        Uri requested = selectedUri;
+        boolean original = !includeGps || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q;
+        PhotoContext.GpsReadStatus status = includeGps
+                ? PhotoContext.GpsReadStatus.UNSUPPORTED_PROVIDER : PhotoContext.GpsReadStatus.NOT_REQUESTED;
+        if (includeGps && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && MediaUriResolver.supportsRequireOriginal(mediaUri)) {
+            try {
+                requested = MediaStore.setRequireOriginal(mediaUri);
+                original = true;
+            } catch (RuntimeException ignored) {
+                original = false;
+                status = PhotoContext.GpsReadStatus.READ_ERROR;
+            }
         }
-        return uri;
+        try (InputStream input = resolver.openInputStream(requested)) {
+            if (input != null) return new OriginalAccess(new ExifInterface(input), original, status);
+        } catch (IOException | RuntimeException ignored) {
+            status = PhotoContext.GpsReadStatus.READ_ERROR;
+        }
+        if (!requested.equals(selectedUri)) {
+            try (InputStream input = resolver.openInputStream(selectedUri)) {
+                if (input != null) return new OriginalAccess(new ExifInterface(input), false, status);
+            } catch (IOException | RuntimeException ignored) { status = PhotoContext.GpsReadStatus.READ_ERROR; }
+        }
+        return new OriginalAccess(null, false, status);
     }
 
     private Row query(Uri uri) {
-        String[] columns;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            columns = new String[]{MediaStore.Images.ImageColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED,
-                    MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME};
-        } else {
-            columns = new String[]{MediaStore.Images.ImageColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED,
-                    MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME};
-        }
+        String[] columns = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                ? new String[]{MediaStore.Images.ImageColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME}
+                : new String[]{MediaStore.Images.ImageColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME};
         Row row = new Row();
         try (Cursor cursor = resolver.query(uri, columns, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
+                row.empty = false;
                 row.dateTaken = number(cursor, MediaStore.Images.ImageColumns.DATE_TAKEN, false);
                 row.lastModified = number(cursor, MediaStore.MediaColumns.DATE_MODIFIED, true);
                 String relativePath = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
                         ? string(cursor, MediaStore.MediaColumns.RELATIVE_PATH) : "";
                 row.path = relativePath + "/" + string(cursor, MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME);
             }
-        } catch (RuntimeException ignored) { /* provider may reject unsupported columns */ }
+        } catch (RuntimeException ignored) { /* provider may reject MediaStore columns */ }
         if (row.lastModified == 0) {
             try (Cursor cursor = resolver.query(uri, new String[]{DocumentsContract.Document.COLUMN_LAST_MODIFIED}, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) row.lastModified = number(cursor, DocumentsContract.Document.COLUMN_LAST_MODIFIED, false);
+                if (cursor != null && cursor.moveToFirst()) {
+                    row.empty = false;
+                    row.lastModified = number(cursor, DocumentsContract.Document.COLUMN_LAST_MODIFIED, false);
+                }
             } catch (RuntimeException ignored) { /* not a DocumentsProvider */ }
         }
         if (row.lastModified == 0 && "file".equals(uri.getScheme()) && uri.getPath() != null) {
+            row.empty = false;
             row.lastModified = new File(uri.getPath()).lastModified();
         }
         return row;
@@ -129,8 +167,21 @@ public final class PhotoMetadataReader {
         String lower = path == null ? "" : path.toLowerCase(Locale.US);
         if (lower.contains("screenshot")) return PhotoContext.MediaType.SCREENSHOT;
         if (lower.contains("download")) return PhotoContext.MediaType.DOWNLOADED;
-        if (cameraExif && (lower.contains("dcim/camera") || lower.contains("/camera"))) return PhotoContext.MediaType.CAMERA_PHOTO;
+        if (cameraExif && (lower.contains("dcim/camera") || lower.contains("/camera") || lower.equals("/camera"))) {
+            return PhotoContext.MediaType.CAMERA_PHOTO;
+        }
         return PhotoContext.MediaType.UNKNOWN;
     }
-    private static final class Row { long dateTaken; long lastModified; String path = ""; }
+
+    private static final class OriginalAccess {
+        final ExifInterface exif;
+        final boolean originalMetadataAvailable;
+        final PhotoContext.GpsReadStatus gpsStatus;
+        OriginalAccess(ExifInterface exif, boolean originalMetadataAvailable, PhotoContext.GpsReadStatus gpsStatus) {
+            this.exif = exif;
+            this.originalMetadataAvailable = originalMetadataAvailable;
+            this.gpsStatus = gpsStatus;
+        }
+    }
+    private static final class Row { long dateTaken; long lastModified; String path = ""; boolean empty = true; }
 }
