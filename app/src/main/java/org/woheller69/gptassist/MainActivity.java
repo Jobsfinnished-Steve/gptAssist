@@ -18,6 +18,7 @@ import static android.webkit.WebView.HitTestResult.SRC_ANCHOR_TYPE;
 import static android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE;
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -34,6 +35,7 @@ import android.os.Message;
 import android.util.Log;
 import android.view.ContextMenu;
 import android.view.KeyEvent;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -53,6 +55,8 @@ import android.widget.Toast;
 import android.webkit.ValueCallback;
 import android.net.Uri;
 
+import androidx.annotation.RequiresApi;
+import androidx.core.app.ActivityCompat;
 import androidx.webkit.URLUtilCompat;
 
 import org.woheller69.freeDroidWarn.FreeDroidWarn;
@@ -61,7 +65,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements PhotoUploadCoordinator.Delegate {
 
     private WebView chatWebView = null;
     private ImageButton restrictedButton = null;
@@ -75,8 +79,16 @@ public class MainActivity extends Activity {
 
     private static final ArrayList<String> allowedDomains = new ArrayList<String>();
 
-    private ValueCallback<Uri[]> mUploadMessage;
-    private final static int FILE_CHOOSER_REQUEST_CODE = 1;
+    private PhotoUploadCoordinator uploadCoordinator;
+    private android.content.SharedPreferences preferences;
+    private static final String PREF_CONTEXT = "photo_context_enabled";
+    private static final String PREF_GPS = "photo_gps_enabled";
+    private static final String PREF_GPS_EXPLAINED = "photo_gps_explained";
+    private static final String PREF_PROXY_MIME = "upload_proxy_mime";
+    private static final int MEDIA_LOCATION_PERMISSION_CODE = 8102;
+    private long activeMediaLocationGeneration = -1;
+    private long waitingMediaLocationGeneration = -1;
+    private UploadProxyDiagnostics lastProxyDiagnostics;
 
     @Override
     protected void onPause() {
@@ -136,6 +148,10 @@ public class MainActivity extends Activity {
         chatWebView = findViewById(R.id.chatWebView);
         registerForContextMenu(chatWebView);
         restrictedButton = findViewById(R.id.restricted);
+        preferences = getSharedPreferences("settings", MODE_PRIVATE);
+        uploadCoordinator = new PhotoUploadCoordinator(this, this);
+        new PhotoContextFileStore(this).cleanup();
+        new UploadProxyStore(this).cleanup();
 
         //Set cookie options
         chatCookieManager = CookieManager.getInstance();
@@ -158,23 +174,8 @@ public class MainActivity extends Activity {
 
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                    if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                        requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 100);
-                    }
-                }
-                if (mUploadMessage != null) {
-                    mUploadMessage.onReceiveValue(null);
-                    mUploadMessage = null;
-                }
-
-                mUploadMessage = filePathCallback;
-
-                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("*/*");
-                startActivityForResult(intent, FILE_CHOOSER_REQUEST_CODE);
-                return true;
+                return uploadCoordinator.show(filePathCallback, fileChooserParams,
+                        preferences.getBoolean(PREF_CONTEXT, true), preferences.getBoolean(PREF_GPS, true));
             }
 
             @Override
@@ -211,15 +212,10 @@ public class MainActivity extends Activity {
                     Log.d(TAG, "[shouldInterceptRequest][NON-HTTPS] Blocked access to " + request.getUrl().toString());
                     return new WebResourceResponse("text/javascript", "UTF-8", null); //Deny URLs that aren't HTTPS
                 }
-                boolean allowed = false;
-                for (String url : allowedDomains) {
-                    if (request.getUrl().getHost().endsWith(url)) {
-                        allowed = true;
-                    }
-                }
+                boolean allowed = AllowedHostMatcher.isAllowed(request.getUrl().getHost(), allowedDomains);
                 if (!allowed) {
                     Log.d(TAG, "[shouldInterceptRequest][NOT ON ALLOWLIST] Blocked access to " + request.getUrl().getHost());
-                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("accounts.google.com") || request.getUrl().getHost().equals("appleid.apple.com")){
+                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("appleid.apple.com")){
                         // ✅ Post ALL UI/WebView operations to main thread
                         view.post(() -> {
                             Toast.makeText(context, context.getString(R.string.error_microsoft_google), Toast.LENGTH_LONG).show();
@@ -251,15 +247,10 @@ public class MainActivity extends Activity {
                     Log.d(TAG, "[shouldOverrideUrlLoading][NON-HTTPS] Blocked access to " + request.getUrl().toString());
                     return true; //Deny URLs that aren't HTTPS
                 }
-                boolean allowed = false;
-                for (String url : allowedDomains) {
-                    if (request.getUrl().getHost().endsWith(url)) {
-                        allowed = true;
-                    }
-                }
+                boolean allowed = AllowedHostMatcher.isAllowed(request.getUrl().getHost(), allowedDomains);
                 if (!allowed) {
                     Log.d(TAG, "[shouldOverrideUrlLoading][NOT ON ALLOWLIST] Blocked access to " + request.getUrl().getHost());
-                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("accounts.google.com") || request.getUrl().getHost().equals("appleid.apple.com")){
+                    if (request.getUrl().getHost().equals("login.microsoftonline.com") || request.getUrl().getHost().equals("appleid.apple.com")){
                         // ✅ Post ALL UI/WebView operations to main thread
                         view.post(() -> {
                             Toast.makeText(context, context.getString(R.string.error_microsoft_google), Toast.LENGTH_LONG).show();
@@ -274,7 +265,7 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request != null && request.isForMainFrame()) {
-                    Log.w(TAG, "[onReceivedError] " + error.getErrorCode() + ": " + error.getDescription() + " @ " + request.getUrl());
+                    logMainFrameError(request, error);
                 }
             }
         });
@@ -320,6 +311,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (uploadCoordinator != null) uploadCoordinator.destroy();
         super.onDestroy();
     }
 
@@ -359,6 +351,7 @@ public class MainActivity extends Activity {
 
     private static void initURLs() {
         //Allowed Domains
+        allowedDomains.clear();
         allowedDomains.add("cdn.auth0.com");
         allowedDomains.add("auth.openai.com");
         allowedDomains.add("chatgpt.com");
@@ -366,31 +359,60 @@ public class MainActivity extends Activity {
         allowedDomains.add("fileserviceuploadsperm.blob.core.windows.net");
         allowedDomains.add("cdn.oaistatic.com");
         allowedDomains.add("oaiusercontent.com");
+        // Google OAuth navigation and the static resources used by its account pages.
+        allowedDomains.add("accounts.google.com");
+        allowedDomains.add("accounts.googleusercontent.com");
+        allowedDomains.add("apis.google.com");
+        allowedDomains.add("oauth2.googleapis.com");
+        allowedDomains.add("ssl.gstatic.com");
+        allowedDomains.add("www.gstatic.com");
+        allowedDomains.add("fonts.googleapis.com");
+        allowedDomains.add("fonts.gstatic.com");
 
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
-        if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
-            if (mUploadMessage == null) return;
-            Uri[] result = null;
-            if (resultCode == Activity.RESULT_OK) {
-                if (intent != null) {
-                    String dataString = intent.getDataString();
-                    if (dataString != null) {
-                        result = new Uri[]{Uri.parse(dataString)};
-                    }
-                }
-            }
-            mUploadMessage.onReceiveValue(result);
-            mUploadMessage = null;
+        if (uploadCoordinator.handlesRequestCode(requestCode)) {
+            boolean includeGps = preferences.getBoolean(PREF_GPS, true);
+            uploadCoordinator.onActivityResult(requestCode, resultCode, intent,
+                    preferences.getBoolean(PREF_CONTEXT, true), includeGps,
+                    UploadProxyMimeMode.fromPreference(preferences.getString(PREF_PROXY_MIME, UploadProxyMimeMode.TEXT.name())));
         }
     }
 
     @Override
     public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
         super.onCreateContextMenu(menu, v, menuInfo);
+        MenuItem contextToggle = menu.add(R.string.photo_context_setting).setCheckable(true)
+                .setChecked(preferences.getBoolean(PREF_CONTEXT, true));
+        contextToggle.setOnMenuItemClickListener(item -> {
+            preferences.edit().putBoolean(PREF_CONTEXT, !item.isChecked()).apply(); return true;
+        });
+        MenuItem gpsToggle = menu.add(R.string.photo_gps_setting).setCheckable(true)
+                .setChecked(preferences.getBoolean(PREF_GPS, true));
+        gpsToggle.setOnMenuItemClickListener(item -> {
+            preferences.edit().putBoolean(PREF_GPS, !item.isChecked()).apply(); return true;
+        });
+        menu.add(R.string.photo_context_insert).setOnMenuItemClickListener(item -> {
+            String last = uploadCoordinator.getLastContext();
+            if (last == null) Toast.makeText(this, R.string.photo_context_unavailable, Toast.LENGTH_SHORT).show();
+            else ChatGptComposerBridge.append(chatWebView, last);
+            return true;
+        });
+        UploadProxyMimeMode proxyMode = UploadProxyMimeMode.fromPreference(
+                preferences.getString(PREF_PROXY_MIME, UploadProxyMimeMode.TEXT.name()));
+        menu.add(getString(R.string.upload_proxy_mime, proxyMode.name())).setOnMenuItemClickListener(item -> {
+            UploadProxyMimeMode next = proxyMode.next();
+            preferences.edit().putString(PREF_PROXY_MIME, next.name()).apply();
+            Toast.makeText(this, getString(R.string.upload_proxy_mime, next.name()), Toast.LENGTH_SHORT).show();
+            return true;
+        });
+        menu.add(R.string.upload_proxy_diagnostics).setOnMenuItemClickListener(item -> {
+            showUploadProxyDiagnostics();
+            return true;
+        });
         WebView.HitTestResult result = chatWebView.getHitTestResult();
         String url = "";
         if (result.getExtra() != null) {
@@ -426,13 +448,7 @@ public class MainActivity extends Activity {
                 }
                 String host = Uri.parse(url).getHost();
                 if (host != null) {
-                    boolean allowed = false;
-                    for (String domain : allowedDomains) {
-                        if (host.endsWith(domain)) {
-                            allowed = true;
-                            break;
-                        }
-                    }
+                    boolean allowed = AllowedHostMatcher.isAllowed(host, allowedDomains);
                     if (!allowed) {  //Copy URLs that are not allowed to open to clipboard
                         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                         ClipData clip = ClipData.newPlainText(getString(R.string.app_name), url);
@@ -469,13 +485,98 @@ public class MainActivity extends Activity {
                 Toast.makeText(context, "Microphone permission denied.", Toast.LENGTH_SHORT).show();
             }
         }
-        // Handle other permission requests if any (like FILE_CHOOSER_REQUEST_CODE)
-        if (requestCode == 100) { // This is the request code for READ_EXTERNAL_STORAGE from onShowFileChooser
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // Permission granted for file access
+        if (requestCode == MEDIA_LOCATION_PERMISSION_CODE) {
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            finishMediaLocationRequest(activeMediaLocationGeneration, granted);
+        }
+    }
+
+
+    @Override
+    public void onPhotoContextReady(long requestGeneration, String photoContext) {
+        // Intentionally bypassed while the upload-proxy transport experiment is active.
+    }
+
+    @Override
+    public void onUploadProxyDiagnostics(UploadProxyDiagnostics diagnostics) {
+        lastProxyDiagnostics = diagnostics;
+    }
+
+    private void showUploadProxyDiagnostics() {
+        UploadProxyDiagnostics d = lastProxyDiagnostics;
+        String message = d == null ? getString(R.string.upload_proxy_no_diagnostics)
+                : "Proxy mode: " + d.mode.name()
+                + "\nSelected image count: " + d.selectedCount
+                + "\nProxy count: " + d.proxyCount
+                + "\nReported MIME: " + d.reportedMime
+                + "\nDISPLAY_NAME suffix: .jpg.txt / .heic.txt"
+                + "\nBytes identical: " + (d.bytesIdentical ? "YES" : "NO")
+                + "\nWebView callback: " + (d.callbackCompleted ? "COMPLETED" : "FAILED");
+        new AlertDialog.Builder(this).setTitle(R.string.upload_proxy_diagnostics)
+                .setMessage(message).setPositiveButton(android.R.string.ok, null).show();
+    }
+
+    @Override
+    public boolean isMediaLocationPermissionGranted() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_MEDIA_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void requestMediaLocationPermission(long requestGeneration) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || !preferences.getBoolean(PREF_CONTEXT, true)
+                || !preferences.getBoolean(PREF_GPS, true)) {
+            uploadCoordinator.onMediaLocationPermissionResult(requestGeneration, false);
+            return;
+        }
+        if (activeMediaLocationGeneration != -1) {
+            waitingMediaLocationGeneration = requestGeneration;
+            return;
+        }
+        activeMediaLocationGeneration = requestGeneration;
+        explainAndRequestPhotoLocation(requestGeneration);
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private void explainAndRequestPhotoLocation(long requestGeneration) {
+        if (!preferences.getBoolean(PREF_GPS_EXPLAINED, false)) {
+            preferences.edit().putBoolean(PREF_GPS_EXPLAINED, true).apply();
+            new AlertDialog.Builder(this).setMessage(R.string.photo_gps_explanation)
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> requestPhotoLocationPermission())
+                    .setNegativeButton(android.R.string.cancel,
+                            (dialog, which) -> finishMediaLocationRequest(requestGeneration, false))
+                    .setOnCancelListener(dialog -> finishMediaLocationRequest(requestGeneration, false)).show();
+        } else requestPhotoLocationPermission();
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private void requestPhotoLocationPermission() {
+        ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, MEDIA_LOCATION_PERMISSION_CODE);
+    }
+
+    private void finishMediaLocationRequest(long requestGeneration, boolean granted) {
+        if (activeMediaLocationGeneration != requestGeneration) return;
+        activeMediaLocationGeneration = -1;
+        uploadCoordinator.onMediaLocationPermissionResult(requestGeneration, granted);
+        long waiting = waitingMediaLocationGeneration;
+        waitingMediaLocationGeneration = -1;
+        if (waiting != -1) {
+            if (isMediaLocationPermissionGranted()) {
+                uploadCoordinator.onMediaLocationPermissionResult(waiting, true);
             } else {
-                Toast.makeText(context, "Storage permission denied.", Toast.LENGTH_SHORT).show();
+                requestMediaLocationPermission(waiting);
             }
+        }
+    }
+
+    private void logMainFrameError(WebResourceRequest request, WebResourceError error) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Log.w(TAG, "[onReceivedError] " + error.getErrorCode() + ": " + error.getDescription() + " @ " + request.getUrl());
+        } else {
+            Log.w(TAG, "[onReceivedError] Main-frame load failed @ " + request.getUrl());
         }
     }
 
