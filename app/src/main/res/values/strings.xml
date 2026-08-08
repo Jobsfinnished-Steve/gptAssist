@@ -18,4 +18,8 @@
     <string name="photo_context_insert">Insert last photo context</string>
     <string name="photo_context_unavailable">No recent photo context is available.</string>
     <string name="photo_gps_explanation">Android may ask for permission to read location already embedded in selected photos. The app never reads your current location.</string>
+    <string name="upload_proxy_mime">Upload disguise MIME: %1$s</string>
+    <string name="upload_proxy_diagnostics">Upload proxy diagnostics</string>
+    <string name="upload_proxy_no_diagnostics">No upload proxy diagnostics are available yet.</string>
+    <string name="upload_proxy_error">Some image proxies could not be created; original images were used.</string>
 </resources>

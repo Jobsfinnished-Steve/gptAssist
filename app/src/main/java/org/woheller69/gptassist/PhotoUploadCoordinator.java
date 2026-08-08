@@ -11,6 +11,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.widget.Toast;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -21,6 +22,7 @@ public final class PhotoUploadCoordinator {
         boolean isMediaLocationPermissionGranted();
         void requestMediaLocationPermission(long requestGeneration);
         void onPhotoContextReady(long requestGeneration, String context);
+        void onUploadProxyDiagnostics(UploadProxyDiagnostics diagnostics);
     }
 
     private static final int REQUEST_CODE_BASE = 8100;
@@ -73,25 +75,55 @@ public final class PhotoUploadCoordinator {
         return requestCode > REQUEST_CODE_BASE && requestCode <= REQUEST_CODE_BASE + REQUEST_CODE_COUNT;
     }
 
-    public void onActivityResult(int requestCode, int resultCode, Intent data, boolean contextEnabled, boolean includeGps) {
+    public void onActivityResult(int requestCode, int resultCode, Intent data, boolean contextEnabled,
+                                 boolean includeGps, UploadProxyMimeMode proxyMode) {
         CallbackRequestRegistry.Request<Uri[]> request = currentRequest;
         if (request == null || requestCode != currentRequestCode) return;
         if (resultCode != Activity.RESULT_OK || data == null) { requests.complete(request, null); return; }
         List<Uri> selected = selectedUris(data);
         if (selected.isEmpty()) { requests.complete(request, null); return; }
         boolean allImages = allSelectedUrisAreImages(selected);
-        if (!contextEnabled || !allImages) {
+        if (!allImages) {
             requests.complete(request, selected.toArray(new Uri[0]));
             return;
         }
-        if (PhotoPermissionDecision.shouldRequest(contextEnabled, includeGps, allImages,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
-                delegate.isMediaLocationPermissionGranted())) {
-            pendingPermissions.retain(request.getGeneration(), new PendingSelection(request, selected));
-            delegate.requestMediaLocationPermission(request.getGeneration());
-            return;
+        executor.execute(() -> createProxyResult(request, selected, proxyMode));
+    }
+
+    private void createProxyResult(CallbackRequestRegistry.Request<Uri[]> request, List<Uri> selected,
+                                   UploadProxyMimeMode mode) {
+        UploadProxyStore store = new UploadProxyStore(activity);
+        ArrayList<Uri> results = new ArrayList<>();
+        int proxyCount = 0;
+        boolean identical = true;
+        String reportedMime = mode.reportedMime(null);
+        for (int i = 0; i < selected.size(); i++) {
+            Uri source = selected.get(i);
+            try {
+                UploadProxyStore.Result proxy = store.create(source, i, request.getGeneration(), mode);
+                results.add(proxy.uri);
+                proxyCount++;
+                identical &= proxy.identical;
+                reportedMime = proxy.reportedMime;
+            } catch (IOException | RuntimeException e) {
+                results.add(source);
+                identical = false;
+            }
         }
-        executor.execute(() -> createResult(request, selected, includeGps, false));
+        int finalProxyCount = proxyCount;
+        boolean finalIdentical = identical;
+        String finalReportedMime = reportedMime;
+        main.post(() -> completeProxy(request, results.toArray(new Uri[0]),
+                new UploadProxyDiagnostics(mode, selected.size(), finalProxyCount,
+                        finalReportedMime, finalIdentical, true), finalProxyCount != selected.size()));
+    }
+
+    private void completeProxy(CallbackRequestRegistry.Request<Uri[]> request, Uri[] result,
+                               UploadProxyDiagnostics diagnostics, boolean hadError) {
+        if (!destroyed && requests.complete(request, result)) {
+            delegate.onUploadProxyDiagnostics(diagnostics);
+            if (hadError) Toast.makeText(activity, R.string.upload_proxy_error, Toast.LENGTH_SHORT).show();
+        }
     }
 
     public void onMediaLocationPermissionResult(long requestGeneration, boolean granted) {

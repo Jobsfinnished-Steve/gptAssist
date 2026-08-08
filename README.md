@@ -76,6 +76,10 @@ Photo context and embedded-GPS inclusion default to on and can be toggled from t
 
 This remains a fork of upstream [gptAssist](https://github.com/woheller69/gptassist) and retains its GPLv3 license and attribution.
 
+### Upload-disguise transport experiment
+
+This branch temporarily bypasses PHOTO_CONTEXT composer insertion for image uploads. After the normal picker returns an image, the app copies its bytes unchanged into `cacheDir/chatgpt_upload_proxy/` with a `.txt` filename suffix and returns the narrow provider URI to WebView. The long-press menu cycles the reported MIME between `text/plain`, `application/octet-stream`, and the original image MIME; this is a device experiment, not a claim that ChatGPT accepts every mode. Source photos are never renamed or modified.
+
 ### Download a debug APK from GitHub Actions
 
 Open the repository's **Actions** tab, select **Build Debug APK**, and choose **Run workflow**. After the run finishes, open it and download **gptassist-photo-context-debug-apk** from **Artifacts**. Extract the downloaded ZIP and install the APK; Android may require you to allow installation from unknown sources for the app used to open it.

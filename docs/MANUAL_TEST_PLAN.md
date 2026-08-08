@@ -38,7 +38,7 @@ Also test picker cancellation during rotation/backgrounding, rapid duplicate cho
 4. Select a photo with coordinates but no altitude and confirm coordinates remain while `gps_altitude_m=none`.
 5. Confirm permission handling does not reopen the picker and completes the WebView callback exactly once.
 
-## Android 16 / Galaxy S23 v3 delivery matrix
+## Legacy Android 16 / Galaxy S23 v3 delivery matrix (suspended)
 
 | Test | Scenario | Expected result |
 |---|---|---|
@@ -46,7 +46,19 @@ Also test picker cancellation during rotation/backgrounding, rapid duplicate cho
 | B | Same photo; deny media-location access | Photo still attaches; `gps=none`, `gps_altitude_m=none`, `gps_status=PERMISSION_DENIED`. |
 | C | Photo without GPS with successful original access | `gps=none`, `gps_altitude_m=none`, `gps_status=NO_GPS_TAG`. |
 | D | Original metadata access unavailable | Capture date remains when readable; location fields are `none` and `gps_status=ORIGINAL_ACCESS_FAILED`. |
-| E | Select two photos | Exactly two image attachments, no TXT attachment, v3 context in composer, and first URI maps to `IMAGE_001`. |
-| F | Type a draft before selecting images | Draft remains, two newlines and v3 context are appended, and nothing is sent automatically. |
+| E | Select two photos | Suspended while the upload-disguise experiment bypasses composer insertion. |
+| F | Type a draft before selecting images | Suspended while the upload-disguise experiment bypasses composer insertion. |
 
 On API 36 the GPS-enabled image-library path must use `ACTION_OPEN_DOCUMENT`. Confirm permission handling never reopens the picker and that selecting multiple images preserves `ClipData` order.
+
+## Galaxy S23 / Android 16 upload-disguise experiment
+
+Before each test, long-press the WebView and select **Upload disguise MIME** until the requested mode is shown. Then open ChatGPT, press **+ → photo/image attachment**, and select a normal Samsung JPEG known to contain GPS EXIF. The Gallery must show the normal photo; the `.txt` proxy is created only after selection.
+
+| Test | Mode | Record |
+|---|---|---|
+| A | `TEXT` (`text/plain`) | Whether ChatGPT accepts `photo.jpg.txt`; if accepted ask: “이 첨부파일의 사진 내용을 설명하고, DateTimeOriginal, GPS latitude/longitude, GPS altitude를 직접 읽어라.” Record visual analysis, EXIF datetime, GPS, and altitude as PASS/FAIL. |
+| B | `OCTET_STREAM` (`application/octet-stream`) | Repeat Test A and record the same four PASS/FAIL results. |
+| C | `IMAGE_MIME` (`image/jpeg`, or original HEIC/HEIF MIME) | Repeat Test A and record whether visual analysis succeeds and whether EXIF survives image processing. |
+
+For the multi-image case, select three JPEGs and confirm diagnostics show selected count 3 and proxy count 3, WebView receives three attachments in selection order, and each image/EXIF block can be inspected independently. Confirm no `PHOTO_CONTEXT.txt` attachment appears and no PHOTO_CONTEXT block is injected into the composer during this experiment.

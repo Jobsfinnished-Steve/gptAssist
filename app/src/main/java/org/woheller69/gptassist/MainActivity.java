@@ -84,10 +84,11 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
     private static final String PREF_CONTEXT = "photo_context_enabled";
     private static final String PREF_GPS = "photo_gps_enabled";
     private static final String PREF_GPS_EXPLAINED = "photo_gps_explained";
+    private static final String PREF_PROXY_MIME = "upload_proxy_mime";
     private static final int MEDIA_LOCATION_PERMISSION_CODE = 8102;
     private long activeMediaLocationGeneration = -1;
     private long waitingMediaLocationGeneration = -1;
-    private final GenerationDeduplicator composerContextGenerations = new GenerationDeduplicator();
+    private UploadProxyDiagnostics lastProxyDiagnostics;
 
     @Override
     protected void onPause() {
@@ -150,6 +151,7 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
         preferences = getSharedPreferences("settings", MODE_PRIVATE);
         uploadCoordinator = new PhotoUploadCoordinator(this, this);
         new PhotoContextFileStore(this).cleanup();
+        new UploadProxyStore(this).cleanup();
 
         //Set cookie options
         chatCookieManager = CookieManager.getInstance();
@@ -375,7 +377,8 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
         if (uploadCoordinator.handlesRequestCode(requestCode)) {
             boolean includeGps = preferences.getBoolean(PREF_GPS, true);
             uploadCoordinator.onActivityResult(requestCode, resultCode, intent,
-                    preferences.getBoolean(PREF_CONTEXT, true), includeGps);
+                    preferences.getBoolean(PREF_CONTEXT, true), includeGps,
+                    UploadProxyMimeMode.fromPreference(preferences.getString(PREF_PROXY_MIME, UploadProxyMimeMode.TEXT.name())));
         }
     }
 
@@ -396,6 +399,18 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
             String last = uploadCoordinator.getLastContext();
             if (last == null) Toast.makeText(this, R.string.photo_context_unavailable, Toast.LENGTH_SHORT).show();
             else ChatGptComposerBridge.append(chatWebView, last);
+            return true;
+        });
+        UploadProxyMimeMode proxyMode = UploadProxyMimeMode.fromPreference(
+                preferences.getString(PREF_PROXY_MIME, UploadProxyMimeMode.TEXT.name()));
+        menu.add(getString(R.string.upload_proxy_mime, proxyMode.name())).setOnMenuItemClickListener(item -> {
+            UploadProxyMimeMode next = proxyMode.next();
+            preferences.edit().putString(PREF_PROXY_MIME, next.name()).apply();
+            Toast.makeText(this, getString(R.string.upload_proxy_mime, next.name()), Toast.LENGTH_SHORT).show();
+            return true;
+        });
+        menu.add(R.string.upload_proxy_diagnostics).setOnMenuItemClickListener(item -> {
+            showUploadProxyDiagnostics();
             return true;
         });
         WebView.HitTestResult result = chatWebView.getHitTestResult();
@@ -479,9 +494,26 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
 
     @Override
     public void onPhotoContextReady(long requestGeneration, String photoContext) {
-        if (composerContextGenerations.markIfNew(requestGeneration)) {
-            ChatGptComposerBridge.append(chatWebView, photoContext);
-        }
+        // Intentionally bypassed while the upload-proxy transport experiment is active.
+    }
+
+    @Override
+    public void onUploadProxyDiagnostics(UploadProxyDiagnostics diagnostics) {
+        lastProxyDiagnostics = diagnostics;
+    }
+
+    private void showUploadProxyDiagnostics() {
+        UploadProxyDiagnostics d = lastProxyDiagnostics;
+        String message = d == null ? getString(R.string.upload_proxy_no_diagnostics)
+                : "Proxy mode: " + d.mode.name()
+                + "\nSelected image count: " + d.selectedCount
+                + "\nProxy count: " + d.proxyCount
+                + "\nReported MIME: " + d.reportedMime
+                + "\nDISPLAY_NAME suffix: .jpg.txt / .heic.txt"
+                + "\nBytes identical: " + (d.bytesIdentical ? "YES" : "NO")
+                + "\nWebView callback: " + (d.callbackCompleted ? "COMPLETED" : "FAILED");
+        new AlertDialog.Builder(this).setTitle(R.string.upload_proxy_diagnostics)
+                .setMessage(message).setPositiveButton(android.R.string.ok, null).show();
     }
 
     @Override
