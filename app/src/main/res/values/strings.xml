@@ -1,6 +1,6 @@
 <resources>
     <string name="app_name" translatable="false">gptAssist</string>
-    <string name="error_microsoft_google">Login via Google, Apple, or Microsoft account is not supported</string>
+    <string name="error_microsoft_google">Login via Apple or Microsoft account is not supported</string>
     <string name="error_copy">Please select and copy text manually</string>
     <!-- StarDialog -->
     <string name="dialog_OK_button">OK</string>
@@ -11,4 +11,15 @@
     <string name="all_urls">All URLs allowed</string>
     <string name="urls_restricted">URLs restricted</string>
     <string name="url_copied">URL copied</string>
+    <string name="photo_read_error">The photo could not be read.</string>
+    <string name="photo_partial_metadata_error">Photos attached, but some metadata could not be read.</string>
+    <string name="photo_context_setting">Generate photo context automatically</string>
+    <string name="photo_gps_setting">Include photo GPS</string>
+    <string name="photo_context_insert">Insert last photo context</string>
+    <string name="photo_context_unavailable">No recent photo context is available.</string>
+    <string name="photo_gps_explanation">Android may ask for permission to read location already embedded in selected photos. The app never reads your current location.</string>
+    <string name="upload_proxy_mime">Upload disguise MIME: %1$s</string>
+    <string name="upload_proxy_diagnostics">Upload proxy diagnostics</string>
+    <string name="upload_proxy_no_diagnostics">No upload proxy diagnostics are available yet.</string>
+    <string name="upload_proxy_error">Some image proxies could not be created; original images were used.</string>
 </resources>
