@@ -99,6 +99,8 @@ public final class PhotoUploadCoordinator {
         boolean identical = true;
         String reportedMime = mode.reportedMime(null);
         OriginalMediaResolver.Status accessStatus = OriginalMediaResolver.Status.UNRESOLVED_PICKER_URI;
+        Boolean gpsCoordinatesReadable = null;
+        Boolean gpsAltitudeReadable = null;
         for (int i = 0; i < selected.size(); i++) {
             Uri source = selected.get(i);
             try {
@@ -110,6 +112,8 @@ public final class PhotoUploadCoordinator {
                 proxyCount++;
                 identical &= proxy.identical;
                 reportedMime = proxy.reportedMime;
+                gpsCoordinatesReadable = proxy.gpsCoordinatesReadable;
+                gpsAltitudeReadable = proxy.gpsAltitudeReadable;
             } catch (IOException | RuntimeException e) {
                 results.add(source);
                 identical = false;
@@ -119,9 +123,12 @@ public final class PhotoUploadCoordinator {
         boolean finalIdentical = identical;
         String finalReportedMime = reportedMime;
         OriginalMediaResolver.Status finalAccessStatus = accessStatus;
+        Boolean finalGpsCoordinatesReadable = gpsCoordinatesReadable;
+        Boolean finalGpsAltitudeReadable = gpsAltitudeReadable;
         main.post(() -> completeProxy(request, results.toArray(new Uri[0]),
                 new UploadProxyDiagnostics(mode, selected.size(), finalProxyCount,
-                        finalReportedMime, finalIdentical, true, finalAccessStatus),
+                        finalReportedMime, finalIdentical, true, finalAccessStatus,
+                        finalGpsCoordinatesReadable, finalGpsAltitudeReadable),
                 finalProxyCount != selected.size()));
     }
 

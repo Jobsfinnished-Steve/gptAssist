@@ -7,6 +7,8 @@ import android.net.Uri;
 import android.provider.OpenableColumns;
 import android.util.Log;
 
+import androidx.exifinterface.media.ExifInterface;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -45,9 +47,16 @@ final class UploadProxyStore {
             copy(input, stream, copiedDigest);
         }
         boolean identical = true;
+        Boolean gpsCoordinatesReadable = null;
+        Boolean gpsAltitudeReadable = null;
         if (BuildConfig.DEBUG) {
             identical = MessageDigest.isEqual(copiedDigest.digest(), hash(output));
+            boolean[] gps = readableGps(output);
+            gpsCoordinatesReadable = gps[0];
+            gpsAltitudeReadable = gps[1];
             Log.d("UploadProxyStore", "UPLOAD_PROXY_BYTES_IDENTICAL=" + identical);
+            Log.d("UploadProxyStore", "UPLOAD_PROXY_GPS_COORDINATES_READABLE=" + gps[0]);
+            Log.d("UploadProxyStore", "UPLOAD_PROXY_GPS_ALTITUDE_READABLE=" + gps[1]);
         }
         String reportedMime = mode.reportedMime(sourceMime);
         Uri proxy = new Uri.Builder().scheme(ContentResolver.SCHEME_CONTENT)
@@ -56,7 +65,7 @@ final class UploadProxyStore {
                 .appendQueryParameter("mode", mode.name())
                 .appendQueryParameter("source_mime", sourceMime == null ? "" : sourceMime).build();
         verifyProviderMetadata(proxy, name, reportedMime);
-        return new Result(proxy, reportedMime, identical);
+        return new Result(proxy, reportedMime, identical, gpsCoordinatesReadable, gpsAltitudeReadable);
     }
 
     void cleanup() { cleanup(new File(context.getCacheDir(), DIRECTORY), null, System.currentTimeMillis()); }
@@ -126,6 +135,19 @@ final class UploadProxyStore {
         if ("image/png".equals(mime)) return ".png";
         return ".jpg";
     }
+    private static boolean[] readableGps(File file) {
+        try (FileInputStream input = new FileInputStream(file)) {
+            ExifInterface exif = new ExifInterface(input);
+            float[] coordinates = new float[2];
+            boolean hasCoordinates = exif.getLatLong(coordinates);
+            double altitude = exif.getAltitude(Double.NaN);
+            boolean hasAltitude = !Double.isNaN(altitude) && !Double.isInfinite(altitude);
+            return new boolean[]{hasCoordinates, hasAltitude};
+        } catch (IOException | RuntimeException ignored) {
+            return new boolean[]{false, false};
+        }
+    }
+
     private static MessageDigest sha256() throws IOException {
         try { return MessageDigest.getInstance("SHA-256"); }
         catch (NoSuchAlgorithmException e) { throw new IOException(e); }
@@ -146,8 +168,12 @@ final class UploadProxyStore {
 
     static final class Result {
         final Uri uri; final String reportedMime; final boolean identical;
-        Result(Uri uri, String reportedMime, boolean identical) {
+        final Boolean gpsCoordinatesReadable; final Boolean gpsAltitudeReadable;
+        Result(Uri uri, String reportedMime, boolean identical,
+               Boolean gpsCoordinatesReadable, Boolean gpsAltitudeReadable) {
             this.uri = uri; this.reportedMime = reportedMime; this.identical = identical;
+            this.gpsCoordinatesReadable = gpsCoordinatesReadable;
+            this.gpsAltitudeReadable = gpsAltitudeReadable;
         }
     }
 }

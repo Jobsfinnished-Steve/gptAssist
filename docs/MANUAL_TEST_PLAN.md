@@ -72,3 +72,13 @@ For the multi-image case, select three JPEGs and confirm diagnostics show select
 5. Repeat after choosing limited photo access. Diagnostics must show `LIMITED_MEDIA_ACCESS` if the chosen provider URI cannot be mapped safely.
 6. Repeat after denying media or location access. The photo must still upload through the selected-URI fallback, while diagnostics must show `MEDIA_PERMISSION_DENIED` or `LOCATION_PERMISSION_DENIED` rather than claiming that GPS tags are absent.
 7. Test a cloud/Photo Picker URI and confirm the app reports `UNRESOLVED_PICKER_URI` instead of guessing a MediaStore ID.
+
+## GPS-redaction boundary check
+
+On a fresh install (or after clearing app data), the app must request photo read access first and `ACCESS_MEDIA_LOCATION` second; they must not be combined into one runtime request. Select a Samsung JPEG known to contain GPS, then open **Upload proxy diagnostics** before sending:
+
+- `Original access: ORIGINAL_AVAILABLE`
+- `Proxy GPS coordinates readable: YES`
+- `Proxy GPS altitude readable: YES` when altitude exists
+
+If either proxy GPS line is `NO`, Android/provider access still supplied redacted bytes and the upload result is not a ChatGPT-side test. If both are `YES` before upload but ChatGPT later reports `NUL`, `0/0`, or `NaN`, the GPS removal occurred after WebView handed the verified proxy to ChatGPT and must be recorded as upload-side sanitization.

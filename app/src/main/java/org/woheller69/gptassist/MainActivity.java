@@ -87,7 +87,9 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
     private static final String PREF_PROXY_MIME = "upload_proxy_mime";
     private static final int MEDIA_LOCATION_PERMISSION_CODE = 8102;
     private static final int ORIGINAL_MEDIA_PERMISSION_CODE = 8103;
-    private static final String PREF_ORIGINAL_PERMISSIONS_REQUESTED = "original_media_permissions_requested";
+    private static final int ORIGINAL_LOCATION_PERMISSION_CODE = 8104;
+    private static final String PREF_MEDIA_READ_REQUESTED = "original_media_read_requested";
+    private static final String PREF_MEDIA_LOCATION_REQUESTED = "original_media_location_requested";
     private long activeMediaLocationGeneration = -1;
     private long waitingMediaLocationGeneration = -1;
     private UploadProxyDiagnostics lastProxyDiagnostics;
@@ -182,7 +184,7 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
                     if (pendingOriginalMediaCallback != null) pendingOriginalMediaCallback.onReceiveValue(null);
                     pendingOriginalMediaCallback = filePathCallback;
                     pendingOriginalMediaParams = fileChooserParams;
-                    requestOriginalMediaPermissions();
+                    requestNextOriginalMediaPermission();
                     return true;
                 }
                 return showUploadChooser(filePathCallback, fileChooserParams);
@@ -494,39 +496,67 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
     }
 
     private boolean needsOriginalMediaPermissions(WebChromeClient.FileChooserParams params) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || preferences.getBoolean(PREF_ORIGINAL_PERMISSIONS_REQUESTED, false)) return false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
         boolean image = false;
         String[] types = params.getAcceptTypes();
         if (types != null) for (String type : types) {
             if (type != null && type.startsWith("image/")) image = true;
         }
         if (!image || params.isCaptureEnabled()) return false;
-        boolean mediaMissing;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            mediaMissing = ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES)
-                    != PackageManager.PERMISSION_GRANTED;
-        } else {
-            mediaMissing = ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED;
-        }
-        boolean locationMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_MEDIA_LOCATION)
-                != PackageManager.PERMISSION_GRANTED;
-        return mediaMissing || locationMissing;
+        return (isMediaReadPermissionMissing()
+                && !preferences.getBoolean(PREF_MEDIA_READ_REQUESTED, false))
+                || (isMediaLocationPermissionMissing()
+                && !preferences.getBoolean(PREF_MEDIA_LOCATION_REQUESTED, false));
     }
 
-    private void requestOriginalMediaPermissions() {
-        preferences.edit().putBoolean(PREF_ORIGINAL_PERMISSIONS_REQUESTED, true).apply();
-        ArrayList<String> permissions = new ArrayList<>();
+    private boolean isMediaReadPermissionMissing() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.READ_MEDIA_IMAGES);
-            if (Build.VERSION.SDK_INT >= 34) permissions.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED);
-        } else {
-            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+            boolean full = ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES)
+                    == PackageManager.PERMISSION_GRANTED;
+            boolean limited = Build.VERSION.SDK_INT >= 34 && ActivityCompat.checkSelfPermission(this,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == PackageManager.PERMISSION_GRANTED;
+            return !full && !limited;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) permissions.add(Manifest.permission.ACCESS_MEDIA_LOCATION);
-        ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), ORIGINAL_MEDIA_PERMISSION_CODE);
+        return ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean isMediaLocationPermissionMissing() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_MEDIA_LOCATION)
+                != PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestNextOriginalMediaPermission() {
+        if (isMediaReadPermissionMissing()
+                && !preferences.getBoolean(PREF_MEDIA_READ_REQUESTED, false)) {
+            preferences.edit().putBoolean(PREF_MEDIA_READ_REQUESTED, true).apply();
+            ArrayList<String> permissions = new ArrayList<>();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                permissions.add(Manifest.permission.READ_MEDIA_IMAGES);
+                if (Build.VERSION.SDK_INT >= 34) permissions.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED);
+            } else {
+                permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+            }
+            ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), ORIGINAL_MEDIA_PERMISSION_CODE);
+            return;
+        }
+        requestOriginalLocationPermissionOrLaunchChooser();
+    }
+
+    private void requestOriginalLocationPermissionOrLaunchChooser() {
+        if (OriginalMediaResolver.mediaAccess(this) == OriginalMediaResolver.MediaAccess.DENIED) {
+            launchPendingOriginalMediaChooser();
+            return;
+        }
+        if (isMediaLocationPermissionMissing()
+                && !preferences.getBoolean(PREF_MEDIA_LOCATION_REQUESTED, false)) {
+            preferences.edit().putBoolean(PREF_MEDIA_LOCATION_REQUESTED, true).apply();
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, ORIGINAL_LOCATION_PERMISSION_CODE);
+            return;
+        }
+        launchPendingOriginalMediaChooser();
     }
 
     private void launchPendingOriginalMediaChooser() {
@@ -551,7 +581,8 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
             boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
             finishMediaLocationRequest(activeMediaLocationGeneration, granted);
         }
-        if (requestCode == ORIGINAL_MEDIA_PERMISSION_CODE) launchPendingOriginalMediaChooser();
+        if (requestCode == ORIGINAL_MEDIA_PERMISSION_CODE) requestOriginalLocationPermissionOrLaunchChooser();
+        if (requestCode == ORIGINAL_LOCATION_PERMISSION_CODE) launchPendingOriginalMediaChooser();
     }
 
 
@@ -565,6 +596,10 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
         lastProxyDiagnostics = diagnostics;
     }
 
+    private static String diagnosticBoolean(Boolean value) {
+        return value == null ? "NOT_CHECKED" : (value ? "YES" : "NO");
+    }
+
     private void showUploadProxyDiagnostics() {
         UploadProxyDiagnostics d = lastProxyDiagnostics;
         String message = d == null ? getString(R.string.upload_proxy_no_diagnostics)
@@ -575,6 +610,8 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
                 + "\nDISPLAY_NAME suffix: .jpg.txt / .heic.txt"
                 + "\nBytes identical: " + (d.bytesIdentical ? "YES" : "NO")
                 + "\nOriginal access: " + d.originalAccessStatus.name()
+                + "\nProxy GPS coordinates readable: " + diagnosticBoolean(d.gpsCoordinatesReadable)
+                + "\nProxy GPS altitude readable: " + diagnosticBoolean(d.gpsAltitudeReadable)
                 + "\nWebView callback: " + (d.callbackCompleted ? "COMPLETED" : "FAILED");
         new AlertDialog.Builder(this).setTitle(R.string.upload_proxy_diagnostics)
                 .setMessage(message).setPositiveButton(android.R.string.ok, null).show();
