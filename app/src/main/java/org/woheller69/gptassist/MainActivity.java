@@ -86,15 +86,9 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
     private static final String PREF_GPS_EXPLAINED = "photo_gps_explained";
     private static final String PREF_PROXY_MIME = "upload_proxy_mime";
     private static final int MEDIA_LOCATION_PERMISSION_CODE = 8102;
-    private static final int ORIGINAL_MEDIA_PERMISSION_CODE = 8103;
-    private static final int ORIGINAL_LOCATION_PERMISSION_CODE = 8104;
-    private static final String PREF_MEDIA_READ_REQUESTED = "original_media_read_requested";
-    private static final String PREF_MEDIA_LOCATION_REQUESTED = "original_media_location_requested";
     private long activeMediaLocationGeneration = -1;
     private long waitingMediaLocationGeneration = -1;
     private UploadProxyDiagnostics lastProxyDiagnostics;
-    private ValueCallback<Uri[]> pendingOriginalMediaCallback;
-    private WebChromeClient.FileChooserParams pendingOriginalMediaParams;
 
     @Override
     protected void onPause() {
@@ -180,14 +174,8 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
 
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
-                if (needsOriginalMediaPermissions(fileChooserParams)) {
-                    if (pendingOriginalMediaCallback != null) pendingOriginalMediaCallback.onReceiveValue(null);
-                    pendingOriginalMediaCallback = filePathCallback;
-                    pendingOriginalMediaParams = fileChooserParams;
-                    requestNextOriginalMediaPermission();
-                    return true;
-                }
-                return showUploadChooser(filePathCallback, fileChooserParams);
+                return uploadCoordinator.show(filePathCallback, fileChooserParams,
+                        preferences.getBoolean(PREF_CONTEXT, true), preferences.getBoolean(PREF_GPS, true));
             }
 
             @Override
@@ -323,9 +311,6 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
 
     @Override
     protected void onDestroy() {
-        if (pendingOriginalMediaCallback != null) pendingOriginalMediaCallback.onReceiveValue(null);
-        pendingOriginalMediaCallback = null;
-        pendingOriginalMediaParams = null;
         if (uploadCoordinator != null) uploadCoordinator.destroy();
         super.onDestroy();
     }
@@ -490,83 +475,6 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
     }
 
 
-    private boolean showUploadChooser(ValueCallback<Uri[]> callback, WebChromeClient.FileChooserParams params) {
-        return uploadCoordinator.show(callback, params,
-                preferences.getBoolean(PREF_CONTEXT, true), preferences.getBoolean(PREF_GPS, true));
-    }
-
-    private boolean needsOriginalMediaPermissions(WebChromeClient.FileChooserParams params) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
-        boolean image = false;
-        String[] types = params.getAcceptTypes();
-        if (types != null) for (String type : types) {
-            if (type != null && type.startsWith("image/")) image = true;
-        }
-        if (!image || params.isCaptureEnabled()) return false;
-        return (isMediaReadPermissionMissing()
-                && !preferences.getBoolean(PREF_MEDIA_READ_REQUESTED, false))
-                || (isMediaLocationPermissionMissing()
-                && !preferences.getBoolean(PREF_MEDIA_LOCATION_REQUESTED, false));
-    }
-
-    private boolean isMediaReadPermissionMissing() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            boolean full = ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES)
-                    == PackageManager.PERMISSION_GRANTED;
-            boolean limited = Build.VERSION.SDK_INT >= 34 && ActivityCompat.checkSelfPermission(this,
-                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == PackageManager.PERMISSION_GRANTED;
-            return !full && !limited;
-        }
-        return ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED;
-    }
-
-    private boolean isMediaLocationPermissionMissing() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_MEDIA_LOCATION)
-                != PackageManager.PERMISSION_GRANTED;
-    }
-
-    private void requestNextOriginalMediaPermission() {
-        if (isMediaReadPermissionMissing()
-                && !preferences.getBoolean(PREF_MEDIA_READ_REQUESTED, false)) {
-            preferences.edit().putBoolean(PREF_MEDIA_READ_REQUESTED, true).apply();
-            ArrayList<String> permissions = new ArrayList<>();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                permissions.add(Manifest.permission.READ_MEDIA_IMAGES);
-                if (Build.VERSION.SDK_INT >= 34) permissions.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED);
-            } else {
-                permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
-            }
-            ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), ORIGINAL_MEDIA_PERMISSION_CODE);
-            return;
-        }
-        requestOriginalLocationPermissionOrLaunchChooser();
-    }
-
-    private void requestOriginalLocationPermissionOrLaunchChooser() {
-        if (OriginalMediaResolver.mediaAccess(this) == OriginalMediaResolver.MediaAccess.DENIED) {
-            launchPendingOriginalMediaChooser();
-            return;
-        }
-        if (isMediaLocationPermissionMissing()
-                && !preferences.getBoolean(PREF_MEDIA_LOCATION_REQUESTED, false)) {
-            preferences.edit().putBoolean(PREF_MEDIA_LOCATION_REQUESTED, true).apply();
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION}, ORIGINAL_LOCATION_PERMISSION_CODE);
-            return;
-        }
-        launchPendingOriginalMediaChooser();
-    }
-
-    private void launchPendingOriginalMediaChooser() {
-        ValueCallback<Uri[]> callback = pendingOriginalMediaCallback;
-        WebChromeClient.FileChooserParams params = pendingOriginalMediaParams;
-        pendingOriginalMediaCallback = null;
-        pendingOriginalMediaParams = null;
-        if (callback != null && params != null) showUploadChooser(callback, params);
-    }
-
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -581,8 +489,6 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
             boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
             finishMediaLocationRequest(activeMediaLocationGeneration, granted);
         }
-        if (requestCode == ORIGINAL_MEDIA_PERMISSION_CODE) requestOriginalLocationPermissionOrLaunchChooser();
-        if (requestCode == ORIGINAL_LOCATION_PERMISSION_CODE) launchPendingOriginalMediaChooser();
     }
 
 

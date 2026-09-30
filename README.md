@@ -78,7 +78,7 @@ This remains a fork of upstream [gptAssist](https://github.com/woheller69/gptass
 
 ### Upload-disguise transport experiment
 
-This branch temporarily bypasses PHOTO_CONTEXT composer insertion for image uploads. After the normal picker returns an image, the app copies its bytes unchanged into `cacheDir/chatgpt_upload_proxy/` with a `.txt` filename suffix and returns the narrow provider URI to WebView. The app resolves direct or Media DocumentsProvider selections to a canonical MediaStore image URI and uses `MediaStore.setRequireOriginal()` when permissions allow before creating the proxy; unresolved providers safely fall back to the selected URI. The long-press menu cycles the reported MIME between `text/plain`, `application/octet-stream`, and the original image MIME. Source photos are never renamed or modified.
+This branch temporarily bypasses PHOTO_CONTEXT composer insertion for image uploads. After the normal picker returns an image, the app copies its bytes unchanged into `cacheDir/chatgpt_upload_proxy/` with a `.txt` filename suffix and returns the narrow provider URI to WebView. The app resolves direct or Media DocumentsProvider selections to a canonical MediaStore image URI and uses `MediaStore.setRequireOriginal()` when permissions allow before creating the proxy; unresolved providers safely fall back to the selected URI. The long-press menu cycles the reported MIME between `text/plain`, `application/octet-stream`, and the original image MIME. Source photos are never renamed or modified. See [Android GPS redaction mechanisms](docs/GPS_REDACTION_MECHANISMS.md) for the boundary between picker/provider redaction and destination-side processing.
 
 ### Download a debug APK from GitHub Actions
 
