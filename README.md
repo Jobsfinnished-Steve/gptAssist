@@ -30,21 +30,17 @@ Or via this link (with fees)
 | **Whisper** | **Seamless** | **SherpaTTS** |
 | [<img src="https://github.com/woheller69/whisperIME/blob/master/fastlane/metadata/android/en-US/images/icon.png" width="50">](https://f-droid.org/packages/org.woheller69.whisper/) | [<img src="https://github.com/woheller69/seamless/blob/master/fastlane/metadata/android/en-US/images/icon.png" width="50">](https://f-droid.org/packages/org.woheller69.seemless/) | [<img src="https://github.com/woheller69/ttsengine/blob/master/fastlane/metadata/android/en-US/images/icon.png" width="50">](https://f-droid.org/packages/org.woheller69.ttsengine/) |
 
-# gptAssist
+# gptAssist Photo Upload
 
-gptAssist is a simple WebView wrapper for ChatGPT. It blocks all URLs which are not essential.
-It does not support login via Apple, Microsoft or Google account.
-Please use a web browser for initial sign up.
+This fork keeps the upstream Java WebView structure but intentionally exposes only the functionality needed for the GPS-preserving upload experiment:
 
-- 🔒 **Privacy-focused**: Blocks unnecessary URLs and tracking
-- 🎯 **Focused interface**: Clean chat experience without browser distractions  
-- 🔄 **Toggle blocking**: Switch between restricted and unrestricted modes
-- 📁 **File support**: Upload files for analysis and conversation
-- 🎤 **Voice input**: Support for voice conversations
-- 📱 **Lightweight**: Minimal app focused on core functionality
+- an unrestricted ChatGPT WebView with normal navigation and authentication resources;
+- persistent cookies, including third-party cookies required by current Cloudflare/auth flows;
+- ordinary document uploads unchanged;
+- byte-identical cache proxies for selected images;
+- upload-proxy MIME selection and non-sensitive diagnostics from the long-press menu.
 
-You can switch on/off blocking by clicking the button at the top right.
-Swipe up a bit to hide the button.
+The upstream URL blocker, restriction toggle/button, download helper, voice permission flow, star/upgrade prompts, PHOTO_CONTEXT generation, and automatic composer integration are not part of this reduced build.
 
 [<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
 alt="Get it on F-Droid"
@@ -67,3 +63,15 @@ If you find a bug, please open an issue in the Github repository, assuming one d
 If you know the solution to a bug please report it in the corresponding issue and if possible modify the code and create a pull request.
 
 
+
+## GPS-preserving upload proxy fork
+
+This fork is intentionally reduced to a ChatGPT WebView and one upload experiment. It has no application URL allowlist, URL-blocking switch, download helper, voice-control code, PHOTO_CONTEXT generation, composer automation, analytics, or advertising. The WebView uses its normal user agent, accepts first- and third-party cookies needed by Cloudflare/authentication, and permits normal HTTPS navigation.
+
+When all selected files are images, the app copies the readable source bytes unchanged into `cacheDir/chatgpt_upload_proxy/`, exposes each proxy through a narrow read-only provider, and returns the proxies in selection order. The default proxy name/MIME is `original.jpg.txt` with `text/plain`; developer menu modes can report octet-stream or the original image MIME. Non-image files pass through unchanged. See [Android GPS redaction mechanisms](docs/GPS_REDACTION_MECHANISMS.md) and the [manual test plan](docs/MANUAL_TEST_PLAN.md).
+
+This remains a fork of upstream [gptAssist](https://github.com/woheller69/gptassist) and retains its GPLv3 license and attribution.
+
+### Download a debug APK from GitHub Actions
+
+Open the repository's **Actions** tab, select **Build Debug APK**, and choose **Run workflow**. After the run finishes, open it and download **gptassist-photo-context-debug-apk** from **Artifacts**. Extract the downloaded ZIP and install the APK; Android may require you to allow installation from unknown sources for the app used to open it.

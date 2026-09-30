@@ -31,6 +31,9 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.webkit:webkit:1.12.1'
-    implementation 'com.github.woheller69:FreeDroidWarn:+'
+    // Keep Kotlin's merged 1.8+ standard library aligned with legacy transitive JDK artifacts.
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    implementation 'androidx.exifinterface:exifinterface:1.4.2'
+    implementation 'androidx.core:core:1.15.0'
+    testImplementation 'junit:junit:4.13.2'
 }
