@@ -67,3 +67,19 @@ If you find a bug, please open an issue in the Github repository, assuming one d
 If you know the solution to a bug please report it in the corresponding issue and if possible modify the code and create a pull request.
 
 
+
+## Photo context fork
+
+This fork can attach original restaurant photos and append one `PHOTO_CONTEXT` block to the ChatGPT composer containing only capture time/source, EXIF offset, optional embedded GPS coordinates and altitude, and a conservative media type. Multi-selection order is preserved and images are never decoded, resized, recompressed, or rewritten. Ordinary file uploads remain unchanged.
+
+Photo context and embedded-GPS inclusion default to on and can be toggled from the WebView long-press menu. Denying media-location permission does not prevent photo upload. The context is kept only in memory and the app's short-lived cache; the app adds no analytics or external server and never sends a message automatically. If mixed photo/text attachment is rejected by the evolving ChatGPT UI, **Insert last photo context** appends the cached block to the existing composer draft without submitting it. See [the format](docs/PHOTO_CONTEXT_V3.md) and [manual test plan](docs/MANUAL_TEST_PLAN.md).
+
+This remains a fork of upstream [gptAssist](https://github.com/woheller69/gptassist) and retains its GPLv3 license and attribution.
+
+### Upload-disguise transport experiment
+
+This branch temporarily bypasses PHOTO_CONTEXT composer insertion for image uploads. After the normal picker returns an image, the app copies its bytes unchanged into `cacheDir/chatgpt_upload_proxy/` with a `.txt` filename suffix and returns the narrow provider URI to WebView. The app resolves direct or Media DocumentsProvider selections to a canonical MediaStore image URI and uses `MediaStore.setRequireOriginal()` when permissions allow before creating the proxy; unresolved providers safely fall back to the selected URI. The long-press menu cycles the reported MIME between `text/plain`, `application/octet-stream`, and the original image MIME. Source photos are never renamed or modified. See [Android GPS redaction mechanisms](docs/GPS_REDACTION_MECHANISMS.md) for the boundary between picker/provider redaction and destination-side processing.
+
+### Download a debug APK from GitHub Actions
+
+Open the repository's **Actions** tab, select **Build Debug APK**, and choose **Run workflow**. After the run finishes, open it and download **gptassist-photo-context-debug-apk** from **Artifacts**. Extract the downloaded ZIP and install the APK; Android may require you to allow installation from unknown sources for the app used to open it.

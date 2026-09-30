@@ -1,5 +1,5 @@
 <resources>
-    <string name="error_microsoft_google">Google, Apple veya Microsoft hesabı üzerinden giriş desteklenmez</string>
+    <string name="error_microsoft_google">Apple veya Microsoft hesabı üzerinden giriş desteklenmez</string>
     <string name="error_copy">Lütfen metni manuel olarak seçin ve kopyalayın</string>
     <!-- StarDialog -->
     <string name="dialog_OK_button">TAMAM</string>
