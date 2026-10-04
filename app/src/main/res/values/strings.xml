@@ -1,14 +1,8 @@
 <resources>
-    <string name="app_name" translatable="false">gptAssist</string>
-    <string name="error_microsoft_google">Login via Google, Apple, or Microsoft account is not supported</string>
-    <string name="error_copy">Please select and copy text manually</string>
-    <!-- StarDialog -->
-    <string name="dialog_OK_button">OK</string>
-    <string name="dialog_NO_button">No</string>
-    <string name="dialog_Later_button">Maybe later</string>
-    <string name="dialog_StarOnGitHub">Do you like this app? Please give a star on GitHub or buy the developer a coffee via PayPal.</string>
-    <string name="download">Download started:</string>
-    <string name="all_urls">All URLs allowed</string>
-    <string name="urls_restricted">URLs restricted</string>
-    <string name="url_copied">URL copied</string>
+    <string name="app_name" translatable="false">gptAssist Photo Upload</string>
+    <string name="photo_read_error">The selected file could not be opened.</string>
+    <string name="upload_proxy_mime">Upload disguise MIME: %1$s</string>
+    <string name="upload_proxy_diagnostics">Upload proxy diagnostics</string>
+    <string name="upload_proxy_no_diagnostics">No upload proxy diagnostics are available yet.</string>
+    <string name="upload_proxy_error">Some image proxies could not be created; original images were used.</string>
 </resources>
