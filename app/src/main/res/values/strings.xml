@@ -5,4 +5,5 @@
     <string name="upload_proxy_diagnostics">Upload proxy diagnostics</string>
     <string name="upload_proxy_no_diagnostics">No upload proxy diagnostics are available yet.</string>
     <string name="upload_proxy_error">Some image proxies could not be created; original images were used.</string>
+    <string name="upload_proxy_gps_missing">Some attachments have no readable GPS before upload. Long-press the page for upload diagnostics.</string>
 </resources>

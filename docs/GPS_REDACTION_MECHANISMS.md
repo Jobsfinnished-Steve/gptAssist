@@ -4,7 +4,7 @@
 
 Under scoped storage, Android may hide photo location metadata even though the app can read the image and ordinary EXIF. Android's documented unredacted MediaStore path requires all of the following:
 
-1. media read access appropriate to the Android version;
+1. read access to the selected item, including a Storage Access Framework document grant;
 2. `ACCESS_MEDIA_LOCATION` on Android 10+;
 3. a canonical `MediaStore` URI that the app can access;
 4. `MediaStore.setRequireOriginal(mediaStoreUri)` before opening the stream.
@@ -33,3 +33,13 @@ Before sending, use **Upload proxy diagnostics**:
 - `Proxy GPS altitude readable: YES` confirms altitude is readable in that proxy.
 
 If proxy GPS is `NO`, investigate the Android URI/permission/provider path. If proxy GPS is `YES` but the uploaded object is redacted, investigate the destination upload path. Do not log or display the coordinate or altitude values themselves.
+
+## Restored original-file path
+
+`ACTION_OPEN_DOCUMENT` is used instead of `ACTION_GET_CONTENT` for ordinary file selection. After an image-only selection, the app requests `ACCESS_MEDIA_LOCATION` on Android 10+. Denial/cancellation resumes the upload with an explicit diagnostic; it never traps the user before the chooser opens.
+
+On Android 10+, `MediaStore.getMediaUri(context, documentUri)` maps supported MediaDocumentsProvider and ExternalStorageProvider documents while preserving their existing per-file grant. A missing broad `READ_MEDIA_IMAGES` grant is no longer an early rejection. Unmapped cloud/vendor/picker URIs remain unsupported for require-original access; no path segments or filenames are guessed into media IDs. Re-select a local DCIM photo through system Files to test that route.
+
+See [getMediaUri](https://developer.android.com/reference/android/provider/MediaStore#getMediaUri(android.content.Context,android.net.Uri)). The public API can return a MediaStore Files URI and removable-storage volume IDs; both are accepted for items already classified as images.
+
+The provider stream is hashed and parsed for GPS in debug AND release. Byte identity compares the readable copy-source stream with the upload provider stream, not with an independently retrieved camera original. Per-image results avoid hiding a failure behind the last successful selection. `NOT_CHECKED` indicates an unavailable/parser-failed GPS check, not proof that the camera never stored location. A `NO` can also mean the original has no GPS; verify against a known GPS-bearing original before assigning a cause.

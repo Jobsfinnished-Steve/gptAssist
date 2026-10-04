@@ -20,6 +20,14 @@ public class OriginalMediaResolverTest {
                 Arrays.asList("picker", "images", "media", "42")));
         assertFalse(OriginalMediaResolver.isDirectMediaStoreImagePath(
                 Arrays.asList("external", "images", "media", "not-numeric")));
+        assertTrue(OriginalMediaResolver.isDirectMediaStoreImagePath(
+                Arrays.asList("1234-ABCD", "images", "media", "42")));
+        assertTrue(OriginalMediaResolver.isDirectMediaStoreImagePath(
+                Arrays.asList("external_primary", "file", "42")));
+        assertFalse(OriginalMediaResolver.isDirectMediaStoreImagePath(
+                Arrays.asList("picker", "file", "42")));
+        assertFalse(OriginalMediaResolver.isDirectMediaStoreImagePath(
+                Arrays.asList("external", "file", "-1")));
     }
 
     @Test public void distinguishesFullLimitedAndDeniedAccess() {
