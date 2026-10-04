@@ -52,9 +52,8 @@ final class OriginalMediaResolver {
 
     Result resolve(Uri selectedUri) {
         MediaAccess mediaAccess = mediaAccess(context);
-        if (mediaAccess == MediaAccess.DENIED) {
-            return new Result(selectedUri, null, null, Status.MEDIA_PERMISSION_DENIED);
-        }
+        // A document URI grant is sufficient to try the selected file. Broad
+        // READ_MEDIA_IMAGES denial must not discard that per-file capability.
         Uri mediaStoreUri = canonicalMediaStoreUri(selectedUri);
         if (mediaStoreUri == null) {
             return new Result(selectedUri, null, null, mediaAccess == MediaAccess.LIMITED
@@ -92,6 +91,15 @@ final class OriginalMediaResolver {
 
     Uri canonicalMediaStoreUri(Uri uri) {
         if (isDirectMediaStoreImage(uri)) return uri;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                // This preserves the document grant, supports MediaDocumentsProvider
+                // and ExternalStorageProvider, and does not guess IDs from paths.
+                Uri mediaUri = MediaStore.getMediaUri(context, uri);
+                if (isDirectMediaStoreImage(mediaUri)) return mediaUri;
+            } catch (RuntimeException ignored) { /* Unsupported or unavailable provider. */ }
+            return null;
+        }
         if (!"com.android.providers.media.documents".equals(uri.getAuthority())
                 || !DocumentsContract.isDocumentUri(context, uri)) return null;
         String documentId;
@@ -115,12 +123,17 @@ final class OriginalMediaResolver {
 
 
     static boolean isDirectMediaStoreImagePath(java.util.List<String> parts) {
-        if (parts == null || parts.size() != 4 || !"media".equals(parts.get(2))
-                || !"images".equals(parts.get(1))) return false;
+        if (parts == null) return false;
+        boolean images = parts.size() == 4 && "images".equals(parts.get(1))
+                && "media".equals(parts.get(2));
+        // getMediaUri can map an ExternalStorageProvider document to Files.
+        // Callers have already classified the selected item as an image.
+        boolean files = parts.size() == 3 && "file".equals(parts.get(1));
+        if (!images && !files) return false;
         String volume = parts.get(0);
         if (!("external".equals(volume) || "external_primary".equals(volume)
-                || "internal".equals(volume))) return false;
-        try { Long.parseLong(parts.get(parts.size() - 1)); return true; }
+                || "internal".equals(volume) || volume.matches("[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"))) return false;
+        try { return Long.parseLong(parts.get(parts.size() - 1)) >= 0; }
         catch (NumberFormatException e) { return false; }
     }
 

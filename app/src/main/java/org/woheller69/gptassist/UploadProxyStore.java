@@ -10,19 +10,20 @@ import android.util.Log;
 import androidx.exifinterface.media.ExifInterface;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
+import java.util.UUID;
 
 final class UploadProxyStore {
     static final String DIRECTORY = "chatgpt_upload_proxy";
     private static final long MAX_AGE_MS = 24L * 60L * 60L * 1000L;
     private final Context context;
     private final ContentResolver resolver;
+    private final String operationId = UUID.randomUUID().toString();
 
     UploadProxyStore(Context context) {
         this.context = context.getApplicationContext();
@@ -31,7 +32,7 @@ final class UploadProxyStore {
 
     Result create(Uri selectedSource, Uri copySource, int index, long generation, UploadProxyMimeMode mode) throws IOException {
         File root = new File(context.getCacheDir(), DIRECTORY);
-        File operation = new File(root, Long.toString(generation));
+        File operation = new File(root, operationId + "-" + generation);
         cleanup(root, operation, System.currentTimeMillis());
         if (!operation.exists() && !operation.mkdirs()) throw new IOException("Unable to create proxy cache");
         String sourceName = displayName(selectedSource);
@@ -39,24 +40,14 @@ final class UploadProxyStore {
         if (sourceMime == null) sourceMime = mimeForName(sourceName);
         String fallbackExtension = extensionForMime(sourceMime);
         String name = disguisedName(sourceName, index, fallbackExtension);
+        // Distinct selected images can have the same display name.
+        while (new File(operation, name).exists()) name = (index + 1) + "_" + name;
         File output = new File(operation, name);
-        MessageDigest copiedDigest = BuildConfig.DEBUG ? sha256() : null;
+        MessageDigest copiedDigest = sha256();
         try (InputStream input = resolver.openInputStream(copySource);
              FileOutputStream stream = new FileOutputStream(output, false)) {
             if (input == null) throw new IOException("Source unavailable");
             copy(input, stream, copiedDigest);
-        }
-        boolean identical = true;
-        Boolean gpsCoordinatesReadable = null;
-        Boolean gpsAltitudeReadable = null;
-        if (BuildConfig.DEBUG) {
-            identical = MessageDigest.isEqual(copiedDigest.digest(), hash(output));
-            boolean[] gps = readableGps(output);
-            gpsCoordinatesReadable = gps[0];
-            gpsAltitudeReadable = gps[1];
-            Log.d("UploadProxyStore", "UPLOAD_PROXY_BYTES_IDENTICAL=" + identical);
-            Log.d("UploadProxyStore", "UPLOAD_PROXY_GPS_COORDINATES_READABLE=" + gps[0]);
-            Log.d("UploadProxyStore", "UPLOAD_PROXY_GPS_ALTITUDE_READABLE=" + gps[1]);
         }
         String reportedMime = mode.reportedMime(sourceMime);
         Uri proxy = new Uri.Builder().scheme(ContentResolver.SCHEME_CONTENT)
@@ -65,6 +56,24 @@ final class UploadProxyStore {
                 .appendQueryParameter("mode", mode.name())
                 .appendQueryParameter("source_mime", sourceMime == null ? "" : sourceMime).build();
         verifyProviderMetadata(proxy, name, reportedMime);
+        // Verify the exact provider stream handed to WebView, in release builds too.
+        boolean identical;
+        try (InputStream input = resolver.openInputStream(proxy)) {
+            if (input == null) throw new IOException("Proxy unavailable");
+            identical = MessageDigest.isEqual(copiedDigest.digest(), hash(input));
+        }
+        if (!identical) throw new IOException("Proxy bytes differ from copy source");
+        Boolean[] gps;
+        try (InputStream input = resolver.openInputStream(proxy)) {
+            gps = readableGps(input);
+        }
+        Boolean gpsCoordinatesReadable = gps[0];
+        Boolean gpsAltitudeReadable = gps[1];
+        if (BuildConfig.DEBUG) {
+            Log.d("UploadProxyStore", "UPLOAD_PROXY_BYTES_IDENTICAL=" + identical);
+            Log.d("UploadProxyStore", "UPLOAD_PROXY_GPS_COORDINATES_READABLE=" + gps[0]);
+            Log.d("UploadProxyStore", "UPLOAD_PROXY_GPS_ALTITUDE_READABLE=" + gps[1]);
+        }
         return new Result(proxy, reportedMime, identical, gpsCoordinatesReadable, gpsAltitudeReadable);
     }
 
@@ -135,16 +144,16 @@ final class UploadProxyStore {
         if ("image/png".equals(mime)) return ".png";
         return ".jpg";
     }
-    private static boolean[] readableGps(File file) {
-        try (FileInputStream input = new FileInputStream(file)) {
+    private static Boolean[] readableGps(InputStream input) {
+        if (input == null) return new Boolean[]{null, null};
+        try {
             ExifInterface exif = new ExifInterface(input);
-            float[] coordinates = new float[2];
-            boolean hasCoordinates = exif.getLatLong(coordinates);
+            boolean hasCoordinates = GpsValueValidation.coordinates(exif.getLatLong());
             double altitude = exif.getAltitude(Double.NaN);
-            boolean hasAltitude = !Double.isNaN(altitude) && !Double.isInfinite(altitude);
-            return new boolean[]{hasCoordinates, hasAltitude};
+            boolean hasAltitude = GpsValueValidation.finite(altitude);
+            return new Boolean[]{hasCoordinates, hasAltitude};
         } catch (IOException | RuntimeException ignored) {
-            return new boolean[]{false, false};
+            return new Boolean[]{null, null};
         }
     }
 
@@ -152,12 +161,10 @@ final class UploadProxyStore {
         try { return MessageDigest.getInstance("SHA-256"); }
         catch (NoSuchAlgorithmException e) { throw new IOException(e); }
     }
-    private static byte[] hash(File file) throws IOException {
+    private static byte[] hash(InputStream input) throws IOException {
         MessageDigest digest = sha256();
-        try (FileInputStream input = new FileInputStream(file)) {
-            byte[] buffer = new byte[64 * 1024]; int read;
-            while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read);
-        }
+        byte[] buffer = new byte[64 * 1024]; int read;
+        while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read);
         return digest.digest();
     }
     private static void deleteRecursively(File file) {

@@ -123,6 +123,12 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (uploadCoordinator != null) uploadCoordinator.onRequestPermissionsResult(requestCode);
+    }
+
+    @Override
     public void onCreateContextMenu(ContextMenu menu, android.view.View view,
                                     ContextMenu.ContextMenuInfo menuInfo) {
         super.onCreateContextMenu(menu, view, menuInfo);
@@ -148,16 +154,11 @@ public class MainActivity extends Activity implements PhotoUploadCoordinator.Del
                 + "\nProxy count: " + d.proxyCount
                 + "\nReported MIME: " + d.reportedMime
                 + "\nBytes identical: " + (d.bytesIdentical ? "YES" : "NO")
-                + "\nOriginal access: " + d.originalAccessStatus.name()
-                + "\nProxy GPS coordinates readable: " + diagnosticBoolean(d.gpsCoordinatesReadable)
-                + "\nProxy GPS altitude readable: " + diagnosticBoolean(d.gpsAltitudeReadable)
+                + "\nBytes compared: provider stream vs copy-source stream (not camera original)"
+                + d.itemSummary()
                 + "\nWebView callback: " + (d.callbackCompleted ? "COMPLETED" : "FAILED");
         new AlertDialog.Builder(this).setTitle(R.string.upload_proxy_diagnostics)
                 .setMessage(message).setPositiveButton(android.R.string.ok, null).show();
-    }
-
-    private static String diagnosticBoolean(Boolean value) {
-        return value == null ? "NOT_CHECKED" : (value ? "YES" : "NO");
     }
 
     @Override

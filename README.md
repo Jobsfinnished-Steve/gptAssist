@@ -68,10 +68,12 @@ If you know the solution to a bug please report it in the corresponding issue an
 
 This fork is intentionally reduced to a ChatGPT WebView and one upload experiment. It has no application URL allowlist, URL-blocking switch, download helper, voice-control code, PHOTO_CONTEXT generation, composer automation, analytics, or advertising. The WebView uses its normal user agent, accepts first- and third-party cookies needed by Cloudflare/authentication, and permits normal HTTPS navigation.
 
-When all selected files are images, the app copies the readable source bytes unchanged into `cacheDir/chatgpt_upload_proxy/`, exposes each proxy through a narrow read-only provider, and returns the proxies in selection order. The default proxy name/MIME is `original.jpg.txt` with `text/plain`; developer menu modes can report octet-stream or the original image MIME. Non-image files pass through unchanged. See [Android GPS redaction mechanisms](docs/GPS_REDACTION_MECHANISMS.md) and the [manual test plan](docs/MANUAL_TEST_PLAN.md).
+When all selected files are images, the app copies the readable source bytes unchanged into `cacheDir/chatgpt_upload_proxy/`, exposes each proxy through a narrow read-only provider, and returns the proxies in selection order. File selection uses the system document picker; after selecting images, Android 10+ requests photo-location metadata permission. Local document grants are mapped using `MediaStore.getMediaUri()` and opened with `setRequireOriginal()` without requiring broad gallery access. The default proxy name/MIME is `original.jpg.txt` with `text/plain`; developer menu modes can report octet-stream or the original image MIME. Non-image files pass through unchanged. See [Android GPS redaction mechanisms](docs/GPS_REDACTION_MECHANISMS.md) and the [manual test plan](docs/MANUAL_TEST_PLAN.md).
 
 This remains a fork of upstream [gptAssist](https://github.com/woheller69/gptassist) and retains its GPLv3 license and attribution.
 
 ### Download a debug APK from GitHub Actions
 
 Open the repository's **Actions** tab, select **Build Debug APK**, and choose **Run workflow**. After the run finishes, open it and download **gptassist-photo-context-debug-apk** from **Artifacts**. Extract the downloaded ZIP and install the APK; Android may require you to allow installation from unknown sources for the app used to open it.
+
+GPS regression comparison and patch validation: [GPS upload fix](docs/GPS_UPLOAD_FIX.md).
