@@ -33,4 +33,23 @@ public class CallbackRequestRegistryTest {
         registry.cancelActive();
         assertEquals(java.util.Collections.singletonList("result"), values);
     }
+
+    @Test public void cancelledRecoveryCannotStartOrCancelAnotherUpload() {
+        CallbackRequestRegistry<String> registry = new CallbackRequestRegistry<>();
+        List<String> firstValues = new ArrayList<>();
+        List<String> secondValues = new ArrayList<>();
+        CallbackRequestRegistry.Request<String> first = registry.begin(firstValues::add);
+        assertTrue(registry.isActive(first));
+        CallbackRequestRegistry.Request<String> second = registry.begin(secondValues::add);
+        assertFalse(registry.isActive(first));
+        assertTrue(registry.isActive(second));
+        assertFalse(registry.complete(first, null));
+        assertEquals(java.util.Collections.singletonList(null), firstValues);
+        assertTrue(secondValues.isEmpty());
+        registry.cancelActive();
+        assertFalse(registry.isActive(second));
+        assertFalse(registry.complete(second, "late permission result"));
+        assertEquals(java.util.Collections.singletonList(null), secondValues);
+        assertFalse(registry.isActive(null));
+    }
 }

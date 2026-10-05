@@ -36,7 +36,11 @@ If proxy GPS is `NO`, investigate the Android URI/permission/provider path. If p
 
 ## Restored original-file path
 
-`ACTION_OPEN_DOCUMENT` is used instead of `ACTION_GET_CONTENT` for ordinary file selection. After an image-only selection, the app requests `ACCESS_MEDIA_LOCATION` on Android 10+. Denial/cancellation resumes the upload with an explicit diagnostic; it never traps the user before the chooser opens.
+`ACTION_OPEN_DOCUMENT` is used instead of `ACTION_GET_CONTENT` for ordinary file selection. After an image-only selection, if location access is missing, the app requests the photo permission group in one operation: `READ_EXTERNAL_STORAGE` + `ACCESS_MEDIA_LOCATION` on Android 10–12L, `READ_MEDIA_IMAGES` + `ACCESS_MEDIA_LOCATION` on Android 13, and `READ_MEDIA_IMAGES` + `READ_MEDIA_VISUAL_USER_SELECTED` + `ACCESS_MEDIA_LOCATION` on Android 14+. Full-library access is not required by the resolver; a supported document's per-file grant is still tried.
+
+The previous location-only request left the observed Android 16 installation in `LOCATION_PERMISSION_DENIED`, and the verified proxy had no GPS before WebView received it. Android's [partial photo access guidance](https://developer.android.com/about/versions/14/changes/partial-photo-video-access#best-practices) recommends requesting selected-photo, media-location and read-media permissions together. The grouped request repairs that omission; device validation is still required.
+
+Denial/dismissal no longer automatically uploads a potentially redacted file. A recovery dialog offers app settings, an explicit upload without GPS, or cancellation. Opening settings cancels the pending attachment exactly once; after changing permissions, return and select the photo again. New chooser requests and activity destruction dismiss the recovery dialog and cannot revive stale uploads. There is no permission prompt before the chooser opens or for ordinary non-image uploads.
 
 On Android 10+, `MediaStore.getMediaUri(context, documentUri)` maps supported MediaDocumentsProvider and ExternalStorageProvider documents while preserving their existing per-file grant. A missing broad `READ_MEDIA_IMAGES` grant is no longer an early rejection. Unmapped cloud/vendor/picker URIs remain unsupported for require-original access; no path segments or filenames are guessed into media IDs. Re-select a local DCIM photo through system Files to test that route.
 

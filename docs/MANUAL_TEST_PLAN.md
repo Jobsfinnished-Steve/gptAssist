@@ -14,7 +14,7 @@ This build has one purpose: display ChatGPT without an application URL allowlist
 
 1. Long-press the WebView and select `TEXT` (`text/plain`).
 2. Press ChatGPT **+ → photo/image attachment** and select a Samsung camera JPEG with known GPS EXIF.
-3. Confirm the system Files/document picker opens and allow the photo-location metadata permission after selection. Confirm exactly one `.jpg.txt` attachment appears and no PHOTO_CONTEXT block is inserted.
+3. Confirm the system Files/document picker opens. If photo-location access is missing, confirm a combined photo access request appears **after** selection. Allow photo access (on Android 14+, also test selecting only the same photo). Confirm exactly one `.jpg.txt` attachment appears and no PHOTO_CONTEXT block is inserted.
 4. Open **Upload proxy diagnostics** before sending and record only:
    - original-access status;
    - selected/proxy counts;
@@ -31,9 +31,10 @@ This build has one purpose: display ChatGPT without an application URL allowlist
 
 ## Regression cases (debug AND release)
 
-- With broad photo-library permissions denied, choose a known GPS-bearing local JPEG from Files → Images or internal storage → DCIM. Grant photo-location permission. Expect ORIGINAL_AVAILABLE and GPS YES for a supported local document.
-- Deny/dismiss location permission: upload completes once, diagnostics show the access failure and a no-readable-GPS notice appears when appropriate. Re-enable via system app settings and reselect. No endless permission/pre-chooser loop.
-- Cancel or replace an upload while permission is pending: the old callback receives null once; only the latest selected upload can resume. Close/recreate the activity while pending: no stale callback or crash.
+- On Android 10/12, 13, and 14/16, start with photo/location permissions denied and choose a known GPS-bearing local JPEG from Files → Images or internal storage → DCIM. Verify the SDK-appropriate permissions are requested together. Grant access, then expect ORIGINAL_AVAILABLE and GPS YES for a supported local document. On Android 14+, repeat with selected-photo access including that JPEG; do not demand full-library access.
+- Reproduce the observed LOCATION_PERMISSION_DENIED on an upgrade from PR #5. Grant photo access with the grouped request; verify the original-access and GPS diagnostics before sending.
+- Deny/dismiss the system permission request: no attachment is returned until the recovery dialog choice. Choose **Upload without GPS**: callback completes once and diagnostics reflect the current permission/provider state. Choose **Cancel**, or dismiss the recovery dialog with Back: callback receives null once. Choose **Open settings**: callback receives null once, settings opens; allow photo access, return and reselect to retry. Repeat after permanent denial where the runtime dialog no longer appears. No endless permission/pre-chooser loop.
+- Cancel or replace an upload while the permission or recovery dialog is pending: the old callback receives null once; only the latest selected upload can resume. Close/recreate the activity while pending: no stale callback, leaked dialog, or crash.
 - Choose a cloud/vendor document: either verified readable GPS is present, or an explicit unresolved/provider status appears; do not promise recovery from redacted bytes.
 - Choose a GPS-free screenshot followed by a GPS-bearing photo, then reverse their order. Both per-image results must remain visible. The first image's failure must not be masked by the last image.
 - Choose two photos with the same display name from different folders; verify separate proxies, stable bytes and order. Recreate the activity and upload another image: older proxies must not be overwritten.

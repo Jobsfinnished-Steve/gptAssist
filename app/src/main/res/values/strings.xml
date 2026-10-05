@@ -6,4 +6,9 @@
     <string name="upload_proxy_no_diagnostics">No upload proxy diagnostics are available yet.</string>
     <string name="upload_proxy_error">Some image proxies could not be created; original images were used.</string>
     <string name="upload_proxy_gps_missing">Some attachments have no readable GPS before upload. Long-press the page for upload diagnostics.</string>
+    <string name="photo_location_permission_title">Photo location access needed</string>
+    <string name="photo_location_permission_message">Photo location access was not granted. Android may hide GPS before this app reads the photo. Open app settings → Permissions → Photos and videos, allow access to the photos you want to upload, then return and select them again. You can also continue without GPS.</string>
+    <string name="photo_location_open_settings">Open settings</string>
+    <string name="photo_location_upload_without_gps">Upload without GPS</string>
+    <string name="photo_location_settings_error">Open Android Settings → Apps → gptAssist → Permissions → Photos and videos to allow photo access.</string>
 </resources>

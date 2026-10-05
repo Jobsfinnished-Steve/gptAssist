@@ -2,12 +2,14 @@ package org.woheller69.gptassist;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.widget.Toast;
@@ -38,6 +40,7 @@ public final class PhotoUploadCoordinator {
     private int currentRequestCode;
     private volatile boolean destroyed;
     private final PendingUploadPermission<PendingSelection> permission = new PendingUploadPermission<>();
+    private AlertDialog permissionRecovery;
 
     public PhotoUploadCoordinator(Activity activity, Delegate delegate) {
         this.activity = activity;
@@ -45,6 +48,7 @@ public final class PhotoUploadCoordinator {
     }
 
     public boolean show(ValueCallback<Uri[]> callback, WebChromeClient.FileChooserParams params) {
+        dismissPermissionRecovery();
         permission.clearSelection();
         currentRequest = requests.begin(callback::onReceiveValue);
         currentRequestCode = REQUEST_CODE_BASE + 1
@@ -80,7 +84,7 @@ public final class PhotoUploadCoordinator {
 
     public void onActivityResult(int requestCode, int resultCode, Intent data, UploadProxyMimeMode mode) {
         CallbackRequestRegistry.Request<Uri[]> request = currentRequest;
-        if (request == null || requestCode != currentRequestCode) return;
+        if (!requests.isActive(request) || requestCode != currentRequestCode) return;
         if (resultCode != Activity.RESULT_OK || data == null) {
             requests.complete(request, null);
             return;
@@ -95,17 +99,16 @@ public final class PhotoUploadCoordinator {
             return;
         }
         PendingSelection selection = new PendingSelection(request, selected, mode);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                && ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_MEDIA_LOCATION)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !hasMediaLocationPermission()) {
             if (permission.await(selection)) {
                 try {
                     // Request only after selection; never block opening the file chooser.
-                    // The document URI supplies read access without broad gallery access.
-                    activity.requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
+                    // Android groups location metadata with photo access. On 14+
+                    // include selected-photo access; full-library access is optional.
+                    activity.requestPermissions(PhotoLocationPermissionPolicy.permissionsFor(Build.VERSION.SDK_INT),
                             LOCATION_PERMISSION_REQUEST);
                 } catch (RuntimeException e) {
-                    resume(permission.finish());
+                    afterPermissionRequest(permission.finish());
                 }
             }
             return;
@@ -114,11 +117,57 @@ public final class PhotoUploadCoordinator {
     }
 
     public void onRequestPermissionsResult(int requestCode) {
-        if (requestCode == LOCATION_PERMISSION_REQUEST) resume(permission.finish());
+        if (requestCode == LOCATION_PERMISSION_REQUEST) afterPermissionRequest(permission.finish());
+    }
+
+    private boolean hasMediaLocationPermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_MEDIA_LOCATION)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean isCurrent(PendingSelection selection) {
+        return !destroyed && selection != null && selection.request == currentRequest
+                && requests.isActive(selection.request);
+    }
+
+    private void afterPermissionRequest(PendingSelection selection) {
+        if (!isCurrent(selection)) return;
+        // Empty/denied grantResults must never silently upload redacted bytes.
+        // Recheck the actual OS state, including a grant from app settings.
+        if (hasMediaLocationPermission()) {
+            resume(selection);
+            return;
+        }
+        dismissPermissionRecovery();
+        permissionRecovery = new AlertDialog.Builder(activity)
+                .setTitle(R.string.photo_location_permission_title)
+                .setMessage(R.string.photo_location_permission_message)
+                .setPositiveButton(R.string.photo_location_open_settings, (dialog, which) -> {
+                    if (!isCurrent(selection)) return;
+                    requests.complete(selection.request, null);
+                    try {
+                        activity.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:" + activity.getPackageName())));
+                    } catch (RuntimeException e) {
+                        Toast.makeText(activity, R.string.photo_location_settings_error, Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton(R.string.photo_location_upload_without_gps, (dialog, which) -> resume(selection))
+                .setNeutralButton(android.R.string.cancel, (dialog, which) -> requests.complete(selection.request, null))
+                .setOnCancelListener(dialog -> requests.complete(selection.request, null))
+                .show();
+    }
+
+    private void dismissPermissionRecovery() {
+        if (permissionRecovery != null) {
+            permissionRecovery.dismiss();
+            permissionRecovery = null;
+        }
     }
 
     private void resume(PendingSelection selection) {
-        if (destroyed || selection == null || selection.request != currentRequest) return;
+        if (!isCurrent(selection)) return;
         // Recheck actual permissions in OriginalMediaResolver, including denial/cancellation.
         executor.execute(() -> createProxyResult(selection.request, selection.selected, selection.mode));
     }
@@ -195,6 +244,7 @@ public final class PhotoUploadCoordinator {
 
     public void destroy() {
         destroyed = true;
+        dismissPermissionRecovery();
         permission.clearSelection();
         requests.cancelActive();
         currentRequest = null;

@@ -34,6 +34,10 @@ public final class CallbackRequestRegistry<T> {
         return true;
     }
 
+    public synchronized boolean isActive(Request<T> request) {
+        return request != null && request == active && !request.completed;
+    }
+
     public synchronized void cancelActive() {
         Request<T> request = active;
         active = null;
