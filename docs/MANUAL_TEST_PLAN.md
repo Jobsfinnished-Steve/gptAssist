@@ -14,7 +14,7 @@ This build has one purpose: display ChatGPT without an application URL allowlist
 
 1. Long-press the WebView and select `TEXT` (`text/plain`).
 2. Press ChatGPT **+ → photo/image attachment** and select a Samsung camera JPEG with known GPS EXIF.
-3. Confirm the system Files/document picker opens. If photo-location access is missing, confirm a combined photo access request appears **after** selection. Allow photo access (on Android 14+, also test selecting only the same photo). Confirm exactly one `.jpg.txt` attachment appears and no PHOTO_CONTEXT block is inserted.
+3. Confirm the Android gallery/Photo Picker opens for the image request instead of Samsung My Files. If photo-location access is missing, confirm a combined photo access request appears **after** selection. Allow photo access (on Android 14+, also test selecting only the same photo). Confirm exactly one `.jpg.txt` attachment appears and no PHOTO_CONTEXT block is inserted.
 4. Open **Upload proxy diagnostics** before sending and record only:
    - original-access status;
    - selected/proxy counts;
@@ -25,7 +25,7 @@ This build has one purpose: display ChatGPT without an application URL allowlist
 5. If proxy GPS is YES, download and independently parse the corresponding uploaded object. If its GPS is absent, investigate processing after the app/provider boundary; a model response alone is not proof. If proxy GPS is NO, check the known original, permission and provider path. NOT_CHECKED means the read/parser did not complete.
 6. Repeat with `OCTET_STREAM` and `IMAGE_MIME`.
 7. Select three images and verify three proxies appear in tap order.
-8. Select PDF/TXT/ZIP files and verify they pass through unchanged without proxy disguise.
+8. Select PDF/TXT/ZIP files through ChatGPT's document request and verify files pass through unchanged without proxy disguise.
 9. Cancel selection and rapidly start two chooser requests; verify no stale or duplicate attachment callback.
 10. Verify no image is resized, recompressed, rewritten, moved, or renamed in the gallery.
 

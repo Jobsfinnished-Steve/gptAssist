@@ -60,13 +60,9 @@ public final class PhotoUploadCoordinator {
             intent = new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("*/*");
         }
-        // GET_CONTENT may be redirected to Photo Picker, whose URI can expose
-        // redacted bytes. DocumentsUI gives a per-file grant usable by getMediaUri.
-        if (Intent.ACTION_GET_CONTENT.equals(intent.getAction())) {
-            intent.setAction(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        }
+        // Keep WebView's requested action and MIME filters. Android can then
+        // route image requests to its gallery/Photo Picker instead of forcing
+        // Samsung devices into the My Files document browser.
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,
                 params.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE);
         try {

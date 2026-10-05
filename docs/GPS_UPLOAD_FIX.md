@@ -13,7 +13,7 @@
 
 ## 수정 내용
 
-1. 일반 파일 선택을 ACTION_OPEN_DOCUMENT로 바꿔, 로컬 문서 접근권한을 받는다.
+1. WebView가 요청한 파일 선택 action과 MIME 필터를 그대로 유지한다. 이미지 요청은 Android 갤러리/사진 선택기를 사용할 수 있고 일반 문서 요청은 원래 선택 동작을 유지한다. ACTION_OPEN_DOCUMENT로 강제 변경해 삼성 내 파일 앱이 열리던 문제를 수정했다.
 2. 사진을 선택한 다음 위치 메타데이터 권한이 없으면 Android 버전에 맞는 사진 읽기 권한과 ACCESS_MEDIA_LOCATION을 함께 요청한다. Android 14+에는 READ_MEDIA_VISUAL_USER_SELECTED도 포함한다. 파일 선택을 사전 권한 요청으로 막지 않는다. 거부/취소되면 설정 열기, GPS 없이 업로드, 취소를 선택하게 한다. 설정 열기는 현재 첨부를 취소하며, 권한 변경 후 다시 사진을 선택한다. 이전 선택은 되살리지 않는다.
 3. Android 10+에서는 공식 getMediaUri API로 문서 URI를 MediaStore URI로 매핑하고 setRequireOriginal로 연다. 개별 문서 접근권한이 있는데 READ_MEDIA_IMAGES가 없다는 이유만으로 중단하지 않는다. 지원되지 않는 공급자는 진단으로 남긴다.
 4. 모든 빌드에서 실제 업로드 Provider의 바이트 해시와 GPS를 검사한다. NaN/무한대/범위 밖 좌표는 성공으로 표시하지 않는다. 정상적인 위도/경도 0은 허용한다.
